@@ -1,0 +1,15 @@
+.venv/
+__pycache__/
+*.py[cod]
+db.sqlite3
+.env
+.env.local
+.env.production
+config/settings/local_settings.py
+config/settings/local_settings.production.py
+*.log
+.DS_Store
+media/
+static/
+staticfiles/
+data/

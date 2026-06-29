@@ -1,0 +1,19 @@
+[Unit]
+Description=Publivalla Celery Worker
+After=network.target redis-server.service postgresql.service
+Requires=redis-server.service
+
+[Service]
+Type=simple
+User=git
+Group=git
+WorkingDirectory=/home/git/backend
+Environment="PATH=/home/git/backend/.venv/bin"
+EnvironmentFile=/home/git/backend/.env
+ExecStart=/home/git/backend/.venv/bin/celery -A config worker -l INFO --concurrency=2
+Restart=always
+RestartSec=5
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

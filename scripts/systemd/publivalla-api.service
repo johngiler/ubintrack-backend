@@ -1,0 +1,15 @@
+[Unit]
+Description=Publivalla API (Gunicorn)
+After=network.target postgresql.service
+
+[Service]
+User=git
+Group=git
+WorkingDirectory=/home/git/backend
+Environment="PATH=/home/git/backend/.venv/bin"
+ExecStart=/home/git/backend/.venv/bin/gunicorn --bind 127.0.0.1:8000 --workers 3 config.wsgi:application
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
