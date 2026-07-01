@@ -98,7 +98,7 @@ def generate_qr_with_label(data, text, level=None, font_path=None):
     draw.text((code_x, code_y), text, font=code_font, fill="black")
 
     buffer = BytesIO()
-    combined_image.save(buffer, format="PNG")
+    combined_image.save(buffer, format="WEBP", quality=85, method=6)
     buffer.seek(0)
 
     return buffer

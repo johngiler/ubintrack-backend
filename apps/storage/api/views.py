@@ -144,7 +144,7 @@ class PositionViewSet(WorkspaceScopeMixin, viewsets.ModelViewSet):
         # Regenerar el QR y el ZPL
         qr_buffer = storage_models.services.generate_qr_with_label(
             position.code, position.code, position.level)
-        filename = f"qrcode-{position.code}.png"
+        filename = f"qrcode-{position.code}.webp"
         position.qr_code_image.save(
             filename, File(qr_buffer), save=False)
 

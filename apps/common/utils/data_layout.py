@@ -22,13 +22,13 @@ def safe_data_tenant_segment(slug: str | None) -> str:
     return safe[:80]
 
 
-def catalog_seed_json_path(workspace_slug: str) -> Path:
+def tenant_data_dir(workspace_slug: str, *relative_parts: str) -> Path:
     """
-    JSON normalizado del comando ``seed_production_catalog`` (se sobrescribe en cada corrida).
+    Directorio bajo ``data/<workspace_slug>/…`` para salidas de comandos por tenant.
 
-    Estructura::
+    Ejemplo::
 
-        data/<workspace_slug>/catalog/data.json
+        tenant_data_dir("rbcold", "imports", "pending") → data/rbcold/imports/pending/
     """
     seg = safe_data_tenant_segment(workspace_slug)
-    return (backend_repo_root() / "data" / seg / "catalog" / "data.json").resolve()
+    return (backend_repo_root() / "data" / seg / Path(*relative_parts)).resolve()

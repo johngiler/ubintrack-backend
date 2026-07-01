@@ -7,6 +7,12 @@ from django_currentuser.db.models import CurrentUserField
 from django.db import transaction
 
 from apps.core.choices import Conditions, OrderStatus, InTypes, BinStatus
+from apps.common.utils.media_layout import (
+    wms_entry_detail_image_upload,
+    wms_entry_pdf_upload,
+    wms_exit_detail_image_upload,
+    wms_exit_pdf_upload,
+)
 
 
 class BaseModel(models.Model):
@@ -264,11 +270,12 @@ class EntryDetail(BaseModel):
     description = models.TextField(
         null=True, blank=True, verbose_name='descripción')
 
-    image = models.ImageField(upload_to='entries/', null=True,
-                              blank=True, verbose_name='imagen')
+    image = models.ImageField(
+        upload_to=wms_entry_detail_image_upload, null=True, blank=True, verbose_name='imagen'
+    )
 
     pdf_document = models.FileField(
-        upload_to='documents/entries/',
+        upload_to=wms_entry_pdf_upload,
         null=True,
         blank=True,
         verbose_name='documento PDF'
@@ -279,14 +286,6 @@ class EntryDetail(BaseModel):
         verbose_name_plural = 'detalle de la orden de entrada'
 
     def save(self, *args, **kwargs):
-        if self.pk:
-            old_image = EntryDetail.objects.filter(pk=self.pk).first().image
-            if self.image and old_image != self.image:
-                ext = os.path.splitext(self.image.name)[1]
-                self.image.name = f'{self.entry.code}{ext}'
-        elif self.image:
-            ext = os.path.splitext(self.image.name)[1]
-            self.image.name = f'{self.entry.code}{ext}'
         super().save(*args, **kwargs)
 
     def __str__(self):
@@ -950,11 +949,12 @@ class ExitDetail(BaseModel):
     description = models.TextField(
         null=True, blank=True, verbose_name='descripción')
 
-    image = models.ImageField(upload_to='exits/', null=True,
-                              blank=True, verbose_name='imagen')
+    image = models.ImageField(
+        upload_to=wms_exit_detail_image_upload, null=True, blank=True, verbose_name='imagen'
+    )
 
     pdf_document = models.FileField(
-        upload_to='documents/exits/',
+        upload_to=wms_exit_pdf_upload,
         null=True,
         blank=True,
         verbose_name='documento PDF'
@@ -965,14 +965,6 @@ class ExitDetail(BaseModel):
         verbose_name_plural = 'detalle de la orden de salida'
 
     def save(self, *args, **kwargs):
-        if self.pk:
-            old_image = ExitDetail.objects.filter(pk=self.pk).first().image
-            if self.image and old_image != self.image:
-                ext = os.path.splitext(self.image.name)[1]
-                self.image.name = f'{self.exit.code}{ext}'
-        elif self.image:
-            ext = os.path.splitext(self.image.name)[1]
-            self.image.name = f'{self.exit.code}{ext}'
         super().save(*args, **kwargs)
 
     def __str__(self):

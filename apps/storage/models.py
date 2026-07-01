@@ -4,6 +4,8 @@ from django_currentuser.db.models import CurrentUserField
 
 from apps.core import choices
 
+from apps.common.utils.media_layout import wms_position_qr_upload
+
 from . import services
 
 
@@ -112,7 +114,7 @@ class Position(BaseModel):
                             editable=False, verbose_name='código')
 
     qr_code_image = models.ImageField(
-        upload_to='positions/',
+        upload_to=wms_position_qr_upload,
         blank=True,
         null=True,
         verbose_name='imagen de código QR'
@@ -138,7 +140,7 @@ class Position(BaseModel):
 
         qr_buffer = services.generate_qr_with_label(
             self.code, self.code, self.level)
-        filename = f"qrcode-{self.code}.png"
+        filename = f"qrcode-{self.code}.webp"
         self.qr_code_image.save(filename, File(qr_buffer), save=False)
 
         self.zpl_code = services.generate_position_tag_zpl(self)

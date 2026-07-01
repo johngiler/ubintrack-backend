@@ -10,6 +10,7 @@ from django.db.models import Sum
 from . import models
 from apps.order.models import ExitProduct
 from apps.core.choices import OrderStatus, BinStatus
+from apps.common.utils.media_layout import build_wms_bin_tag_relative, ensure_media_parent_dir
 
 
 def generate_bin_tag(bin_instance):
@@ -235,14 +236,9 @@ def generate_bin_tag(bin_instance):
     qr_x = (tag_width - 450) // 2
     tag.paste(qr_image, (qr_x, y_pos))
 
-    # Crear el directorio para guardar los tags si no existe
-    tags_directory = os.path.join(settings.MEDIA_ROOT, "tags")
-    os.makedirs(tags_directory, exist_ok=True)
-
-    # Guardar la imagen del tag
-    tag_filename = f"tag_{bin_instance.code}.png"
-    tag_path = os.path.join(tags_directory, tag_filename)
-    tag.save(tag_path)
+    relative_path = build_wms_bin_tag_relative(bin_instance)
+    tag_path = ensure_media_parent_dir(relative_path)
+    tag.save(tag_path, format="WEBP", quality=85, method=6)
 
     return tag_path
 

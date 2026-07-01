@@ -1,5 +1,5 @@
 """
-WebP en servidor: subida y ``save()`` de portadas / galería (Pillow), más ``convert_media_to_webp``.
+WebP en servidor: conversión automática en ``pre_save`` y utilidades para generación programática.
 """
 
 from __future__ import annotations
@@ -11,6 +11,9 @@ from io import BytesIO
 logger = logging.getLogger(__name__)
 
 DEFAULT_WEBP_QUALITY = 85
+
+RASTER_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".tif", ".tiff"}
+SKIP_EXTENSIONS = {".webp", ".svg", ".ico"}
 
 
 def raster_bytes_to_webp(raw: bytes, quality: int = DEFAULT_WEBP_QUALITY) -> bytes | None:
@@ -55,6 +58,22 @@ def raster_bytes_to_webp(raw: bytes, quality: int = DEFAULT_WEBP_QUALITY) -> byt
     return out.getvalue()
 
 
+def pil_image_to_webp_bytes(img, quality: int = DEFAULT_WEBP_QUALITY) -> bytes:
+    """Codifica un ``PIL.Image`` a WebP."""
+    buf = BytesIO()
+    img.save(buf, format="WEBP", quality=quality, method=6)
+    return buf.getvalue()
+
+
+def should_convert_path_to_webp(name: str | None) -> bool:
+    if not name:
+        return False
+    ext = os.path.splitext(name.replace("\\", "/").lower())[1]
+    if ext in SKIP_EXTENSIONS:
+        return False
+    return ext in RASTER_EXTENSIONS or ext == ""
+
+
 def ensure_imagefields_webp(instance, field_names: tuple[str, ...], quality: int = DEFAULT_WEBP_QUALITY) -> None:
     """
     Convierte a WebP los ImageField indicados antes de ``save()``.
@@ -68,7 +87,7 @@ def ensure_imagefields_webp(instance, field_names: tuple[str, ...], quality: int
         if not field:
             continue
         old_name = getattr(field, "name", None) or ""
-        if not old_name or old_name.lower().endswith(".webp"):
+        if not old_name or not should_convert_path_to_webp(old_name):
             continue
 
         try:

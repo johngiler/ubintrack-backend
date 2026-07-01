@@ -1,10 +1,12 @@
 """
 Convierte imágenes existentes en MEDIA_ROOT a WebP y actualiza rutas en la base de datos.
 
-Uso:
+Las subidas nuevas se convierten automáticamente vía ``apps.common.signals`` (pre_save).
+Este comando sirve para backfill o reparación:
+
   python manage.py convert_media_to_webp
   python manage.py convert_media_to_webp --dry-run
-  python manage.py convert_media_to_webp --scan-files  # también archivos sueltos bajo media/
+  python manage.py convert_media_to_webp --scan-files
 """
 
 from __future__ import annotations
@@ -16,21 +18,21 @@ from django.conf import settings
 from django.core.management.base import BaseCommand
 from django.db import transaction
 
-from apps.ad_spaces.models import AdSpace, AdSpaceImage
-from apps.clients.models import Client
-from apps.common.utils.image_webp import DEFAULT_WEBP_QUALITY, ensure_imagefields_webp, raster_bytes_to_webp
-from apps.malls.models import ShoppingCenter
-from apps.users.models import UserProfile
-
-
-RASTER_SUFFIXES = {".jpg", ".jpeg", ".png", ".gif"}
+from apps.common.utils.image_webp import (
+    DEFAULT_WEBP_QUALITY,
+    RASTER_EXTENSIONS,
+    ensure_imagefields_webp,
+    raster_bytes_to_webp,
+    should_convert_path_to_webp,
+)
+from apps.inventory.models import Bin
+from apps.order.models import EntryDetail, ExitDetail
+from apps.storage.models import Position
+from apps.workspaces.models import Workspace
 
 
 class Command(BaseCommand):
-    help = (
-        "Convierte portadas, galería y fotos de usuario/empresa a WebP (modelos) "
-        "y opcionalmente todos los raster en media/."
-    )
+    help = "Convierte imágenes raster del WMS a WebP (modelos y opcionalmente archivos sueltos en media/)."
 
     def add_arguments(self, parser):
         parser.add_argument(
@@ -41,7 +43,7 @@ class Command(BaseCommand):
         parser.add_argument(
             "--scan-files",
             action="store_true",
-            help="Recorre MEDIA_ROOT y convierte .jpg/.png/.gif sueltos (actualiza BD si coincide la ruta).",
+            help="Recorre MEDIA_ROOT y convierte raster huérfanos bajo media/.",
         )
         parser.add_argument(
             "--quality",
@@ -55,45 +57,40 @@ class Command(BaseCommand):
         scan_files = options["scan_files"]
         quality = options["quality"]
 
-        n_repair = self._reconcile_stale_webp_paths(dry)
-        if n_repair:
-            self.stdout.write(self.style.SUCCESS(f"Rutas .webp reparadas (archivo raster en disco): {n_repair}"))
-
         n_models = self._convert_model_fields(dry, quality)
         self.stdout.write(self.style.SUCCESS(f"Filas de modelo procesadas: {n_models}"))
 
         if scan_files:
             n_fs = self._scan_filesystem(dry, quality)
-            self.stdout.write(self.style.SUCCESS(f"Archivos en disco convertidos (o omitidos): {n_fs}"))
+            self.stdout.write(self.style.SUCCESS(f"Archivos en disco convertidos (u omitidos): {n_fs}"))
 
     def _convert_model_fields(self, dry: bool, quality: int) -> int:
         count = 0
         batches = [
             (
-                ShoppingCenter.objects.exclude(cover_image="").exclude(cover_image__isnull=True),
-                ("cover_image",),
+                Workspace.objects.exclude(logo="").exclude(logo__isnull=True),
+                ("logo",),
             ),
             (
-                AdSpace.objects.exclude(cover_image="").exclude(cover_image__isnull=True),
-                ("cover_image",),
-            ),
-            (AdSpaceImage.objects.exclude(image=""), ("image",)),
-            (
-                UserProfile.objects.exclude(cover_image="").exclude(cover_image__isnull=True),
-                ("cover_image",),
+                Workspace.objects.exclude(logo_mark="").exclude(logo_mark__isnull=True),
+                ("logo_mark",),
             ),
             (
-                Client.objects.exclude(cover_image="").exclude(cover_image__isnull=True),
-                ("cover_image",),
+                Workspace.objects.exclude(favicon="").exclude(favicon__isnull=True),
+                ("favicon",),
             ),
+            (EntryDetail.objects.exclude(image=""), ("image",)),
+            (ExitDetail.objects.exclude(image=""), ("image",)),
+            (Bin.objects.exclude(tag_image=""), ("tag_image",)),
+            (Position.objects.exclude(qr_code_image=""), ("qr_code_image",)),
         ]
 
         for qs, fields in batches:
             for obj in qs.iterator():
                 name = getattr(getattr(obj, fields[0]), "name", "") or ""
-                if name.lower().endswith(".webp"):
+                if not should_convert_path_to_webp(name):
                     continue
-                self.stdout.write(f"  modelo {obj.__class__.__name__} pk={obj.pk} → {name}")
+                self.stdout.write(f"  {obj.__class__.__name__} pk={obj.pk} → {name}")
                 if dry:
                     count += 1
                     continue
@@ -104,12 +101,11 @@ class Command(BaseCommand):
         return count
 
     def _scan_filesystem(self, dry: bool, quality: int) -> int:
-        """Convierte raster en media/ que sigan existiendo como no-WebP (p. ej. huérfanos)."""
         from django.core.files.storage import default_storage
 
         media_root = getattr(settings, "MEDIA_ROOT", None)
         if not media_root or not os.path.isdir(media_root):
-            self.stdout.write(self.style.WARNING("MEDIA_ROOT no configurado o no es directorio; --scan-files omitido."))
+            self.stdout.write(self.style.WARNING("MEDIA_ROOT no configurado; --scan-files omitido."))
             return 0
 
         count = 0
@@ -117,10 +113,9 @@ class Command(BaseCommand):
         for path in root.rglob("*"):
             if not path.is_file():
                 continue
-            if path.suffix.lower() not in RASTER_SUFFIXES:
+            if path.suffix.lower() not in RASTER_EXTENSIONS:
                 continue
-            if path.suffix.lower() == ".webp":
-                continue
+
             webp_path = path.with_suffix(".webp")
             if webp_path.exists():
                 continue
@@ -136,14 +131,14 @@ class Command(BaseCommand):
             raw = path.read_bytes()
             out = raster_bytes_to_webp(raw, quality=quality)
             if not out:
-                self.stdout.write(self.style.WARNING(f"    omitido (no raster): {rel_old}"))
+                self.stdout.write(self.style.WARNING(f"    omitido: {rel_old}"))
                 continue
 
             webp_path.write_bytes(out)
             try:
                 path.unlink()
             except OSError as e:
-                self.stdout.write(self.style.WARNING(f"    no se pudo borrar original {rel_old}: {e}"))
+                self.stdout.write(self.style.WARNING(f"    no se pudo borrar {rel_old}: {e}"))
 
             self._update_db_paths_if_needed(rel_old, rel_new)
             if default_storage.exists(rel_old) and rel_old != rel_new:
@@ -154,58 +149,16 @@ class Command(BaseCommand):
             count += 1
         return count
 
-    def _reconcile_stale_webp_paths(self, dry: bool) -> int:
-        """
-        Si la BD apunta a .webp pero solo existe el raster (.png, .jpg, …),
-        actualiza la ruta al archivo existente antes de convertir.
-        """
-        from django.core.files.storage import default_storage
-
-        count = 0
-        for model, field in (
-            (UserProfile, "cover_image"),
-            (Client, "cover_image"),
-            (ShoppingCenter, "cover_image"),
-            (AdSpace, "cover_image"),
-            (AdSpaceImage, "image"),
-        ):
-            qs = model.objects.exclude(**{f"{field}": ""}).exclude(**{f"{field}__isnull": True})
-            for obj in qs.iterator():
-                name = getattr(getattr(obj, field), "name", "") or ""
-                if not name.lower().endswith(".webp"):
-                    continue
-                if default_storage.exists(name):
-                    continue
-                stem = name[:-5]
-                found = None
-                for ext in (".png", ".jpg", ".jpeg", ".gif"):
-                    alt = f"{stem}{ext}"
-                    if default_storage.exists(alt):
-                        found = alt
-                        break
-                if not found:
-                    self.stdout.write(
-                        self.style.WARNING(
-                            f"  sin archivo: {model.__name__} pk={obj.pk} → {name}"
-                        )
-                    )
-                    continue
-                self.stdout.write(f"  reparar {model.__name__} pk={obj.pk}: {name} → {found}")
-                if not dry:
-                    model.objects.filter(pk=obj.pk).update(**{field: found})
-                count += 1
-        return count
-
     def _update_db_paths_if_needed(self, rel_old: str, rel_new: str) -> None:
-        """Si algún ImageField apuntaba al archivo antiguo, actualiza a .webp."""
         for model, field in (
-            (ShoppingCenter, "cover_image"),
-            (AdSpace, "cover_image"),
-            (AdSpaceImage, "image"),
-            (UserProfile, "cover_image"),
-            (Client, "cover_image"),
+            (Workspace, "logo"),
+            (Workspace, "logo_mark"),
+            (Workspace, "favicon"),
+            (EntryDetail, "image"),
+            (ExitDetail, "image"),
+            (Bin, "tag_image"),
+            (Position, "qr_code_image"),
         ):
-            qs = model.objects.filter(**{f"{field}": rel_old})
-            n = qs.update(**{field: rel_new})
+            n = model.objects.filter(**{field: rel_old}).update(**{field: rel_new})
             if n:
-                self.stdout.write(f"    BD: actualizado {n} {model.__name__}(…{field})")
+                self.stdout.write(f"    BD: {n} {model.__name__}.{field}")

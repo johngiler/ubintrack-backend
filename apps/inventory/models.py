@@ -9,6 +9,8 @@ from django.utils import timezone
 
 from apps.core import choices
 
+from apps.common.utils.media_layout import wms_bin_tag_upload
+
 from . import services
 
 
@@ -131,7 +133,7 @@ class Bin(BaseModel):
     )
 
     tag_image = models.ImageField(
-        upload_to='tags/', blank=True, null=True, verbose_name='imagen de tag')
+        upload_to=wms_bin_tag_upload, blank=True, null=True, verbose_name='imagen de tag')
 
     zpl_code = models.TextField(
         blank=True, null=True, verbose_name='código ZPL')

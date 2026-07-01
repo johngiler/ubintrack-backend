@@ -1,1 +1,1 @@
-"""Utilidades compartidas (catálogo público, imágenes WebP, layout de media, paginación DRF)."""
+"""Utilidades compartidas (layout de media, imágenes WebP, rutas de data por tenant)."""

@@ -3,7 +3,6 @@ from django.utils.html import mark_safe
 from apps.core.admin_mixins import ClientFilterMixin
 
 from . import models
-from . import forms
 
 
 @admin.register(models.Category)
@@ -14,7 +13,6 @@ class CategoryAdmin(admin.ModelAdmin):
 
 @admin.register(models.Product)
 class ProductAdmin(ClientFilterMixin, admin.ModelAdmin):
-    form = forms.ProductForm
     list_filter = ('rotation_type', 'condition', 'category')
     list_display = ('name', 'client', 'code', 'client_sku', 'rotation_type')
     search_fields = ('name', 'client_sku')
@@ -27,7 +25,6 @@ class ProductAdmin(ClientFilterMixin, admin.ModelAdmin):
 
 
 class BinProductInline(admin.TabularInline):
-    form = forms.BinProductForm
     model = models.BinProduct
     extra = 1
     fields = ('entry_product', 'batch', 'expiration_date', 'quantity')
@@ -44,7 +41,6 @@ class BinProductInline(admin.TabularInline):
 
 @admin.register(models.Bin)
 class BinAdmin(admin.ModelAdmin):
-    form = forms.BinForm
     list_display = ('code', 'client', 'entry', 'status',
                     'position', 'product_with_quantities')
     search_fields = ('code', 'entry__code', 'position__code', 'client__name')

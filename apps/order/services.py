@@ -22,6 +22,11 @@ from .models import ExitProduct, Exit, OrderStatus, Entry, ExitMovement, ExitMov
 from apps.inventory.models import Bin, BinMovement, BinMovementType
 from apps.storage.models import Position
 from apps.core import choices
+from apps.common.utils.media_layout import (
+    build_wms_entry_pdf_relative,
+    build_wms_exit_pdf_relative,
+    ensure_media_parent_dir,
+)
 
 
 class TransactionError(Exception):
@@ -1099,17 +1104,9 @@ def generate_exit_pdf(exit_instance):
         print(
             f"ADVERTENCIA: La orden de salida {exit_instance.code} no tiene grupos de productos. Puede que el PDF se genere vacío.")
 
-    # Crear directorio para almacenar los documentos si no existe
-    documents_dir = os.path.join(settings.MEDIA_ROOT, "documents", "exits")
-    os.makedirs(documents_dir, exist_ok=True)
-
-    # Nombre del archivo basado en el código de salida (sanitizado para evitar problemas con /)
-    safe_code = exit_instance.code.replace('/', '_')
-    filename = f"{safe_code}.pdf"
-    filepath = os.path.join(documents_dir, filename)
-
-    # Ruta relativa para guardar en la base de datos
-    relative_path = os.path.join("documents", "exits", filename)
+    relative_path = build_wms_exit_pdf_relative(exit_instance)
+    filepath = ensure_media_parent_dir(relative_path)
+    filename = os.path.basename(relative_path)
 
     # Configuración del documento
     buffer = BytesIO()
@@ -1432,17 +1429,9 @@ def generate_entry_pdf(entry_instance):
         print(
             f"ADVERTENCIA: La orden de entrada {entry_instance.code} no tiene productos. Puede que el PDF se genere vacío.")
 
-    # Crear directorio para almacenar los documentos si no existe
-    documents_dir = os.path.join(settings.MEDIA_ROOT, "documents", "entries")
-    os.makedirs(documents_dir, exist_ok=True)
-
-    # Nombre del archivo basado en el código de entrada (sanitizado para evitar problemas con /)
-    safe_code = entry_instance.code.replace('/', '_')
-    filename = f"{safe_code}.pdf"
-    filepath = os.path.join(documents_dir, filename)
-
-    # Ruta relativa para guardar en la base de datos
-    relative_path = os.path.join("documents", "entries", filename)
+    relative_path = build_wms_entry_pdf_relative(entry_instance)
+    filepath = ensure_media_parent_dir(relative_path)
+    filename = os.path.basename(relative_path)
 
     # Configuración del documento
     buffer = BytesIO()

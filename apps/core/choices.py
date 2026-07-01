@@ -32,9 +32,6 @@ class BinStatus(models.TextChoices):
     DESPACHADO = 'despachado', 'Despachado'
 
 
-BinEntryStatus = BinStatus
-
-
 class OrderStatus(models.TextChoices):
     PENDIENTE = 'pendiente', 'Pendiente'
     EN_PROGRESO = 'en_progreso', 'En Progreso'

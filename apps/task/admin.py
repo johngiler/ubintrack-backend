@@ -1,7 +1,6 @@
 from django.contrib import admin
 
 from . import models
-from . import forms
 
 
 class TaskLogInline(admin.TabularInline):
@@ -29,10 +28,12 @@ class TaskAdmin(admin.ModelAdmin):
     )
 
     list_filter = ("task_type", "status", "priority")
-    search_fields = ("code", "assigned_to__username", "entry__code", "exit__code")
+    search_fields = ("code", "assigned_to__username",
+                     "entry__code", "exit__code")
     filter_horizontal = ("assigned_to",)
     autocomplete_fields = ("entry", "exit")
-    readonly_fields = ("code", "created_at", "updated_at", "created_by", "updated_by")
+    readonly_fields = ("code", "created_at", "updated_at",
+                       "created_by", "updated_by")
 
     def get_assigned_users(self, obj):
         """Mostrar usuarios asignados en el list_display"""
@@ -78,8 +79,6 @@ class TaskAdmin(admin.ModelAdmin):
 
 @admin.register(models.UserTaskTracking)
 class UserTaskTrackingAdmin(admin.ModelAdmin):
-    form = forms.UserTaskTrackingForm
-
     list_display = (
         "user",
         "task",
