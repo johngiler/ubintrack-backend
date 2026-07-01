@@ -7,7 +7,7 @@ User=git
 Group=git
 WorkingDirectory=/home/git/backend
 Environment="PATH=/home/git/backend/.venv/bin"
-ExecStart=/home/git/backend/.venv/bin/gunicorn --bind 127.0.0.1:8000 --workers 3 config.wsgi:application
+ExecStart=/home/git/backend/.venv/bin/gunicorn --timeout 600 --error-logfile /var/log/gunicorn/gunicorn-error.log --access-logfile /var/log/gunicorn/gunicorn-access.log --log-file /var/log/gunicorn/gunicorn.log --workers 2 --bind 127.0.0.1:8000 config.wsgi:application
 Restart=always
 RestartSec=5
 
