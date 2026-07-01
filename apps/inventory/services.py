@@ -2,7 +2,7 @@ import os
 import qrcode
 import xlwt
 from io import BytesIO
-
+import logging
 from PIL import Image, ImageDraw, ImageFont
 from django.conf import settings
 from django.db.models import Sum
@@ -16,6 +16,8 @@ from apps.common.utils.pdf_branding import (
     workspace_display_name,
     workspace_from_client,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def generate_bin_tag(bin_instance):
@@ -47,7 +49,8 @@ def generate_bin_tag(bin_instance):
             header_font = ImageFont.truetype("Arial", 32)
             text_font = ImageFont.truetype("Arial", 28)
         except OSError:
-            print("No se pudo cargar ninguna fuente. Usando la fuente predeterminada.")
+            logger.error(
+                "No se pudo cargar ninguna fuente. Usando la fuente predeterminada.")
             title_font = ImageFont.load_default()
             header_font = ImageFont.load_default()
             text_font = ImageFont.load_default()
@@ -260,7 +263,8 @@ def generate_bin_tag_zpl(bin_instance):
 
     bin_code = bin_instance.code
     workspace = workspace_from_client(bin_instance.client)
-    company_name = truncate_text_zpl(zpl_safe(workspace_display_name(workspace)))
+    company_name = truncate_text_zpl(
+        zpl_safe(workspace_display_name(workspace)))
     client = truncate_text_zpl(zpl_safe(client))
     position = zpl_safe(position)
     bin_code = zpl_safe(bin_code)

@@ -1,10 +1,12 @@
 import os
 import socket
+import logging
 from dotenv import load_dotenv
 
 # Cargar variables de entorno
 load_dotenv()
 
+logger = logging.getLogger(__name__)
 # Obtener configuración del .env o usar valores por defecto
 printer_ip = os.getenv('ZEBRA_PRINTER_IP', '190.122.189.156')
 printer_port = int(os.getenv('ZEBRA_PRINTER_PORT', '9100'))
@@ -39,12 +41,13 @@ def print_to_zebra(zpl_data):
         return True
 
     except socket.timeout:
-        print(
+        logger.error(
             f"Error: Timeout al conectar con la impresora {printer_ip}:{printer_port}")
         return False
     except ConnectionRefusedError:
-        print(f"Error: Conexión rechazada por la impresora {printer_ip}:{printer_port}")
+        logger.error(
+            f"Error: Conexión rechazada por la impresora {printer_ip}:{printer_port}")
         return False
     except Exception as e:
-        print(f"Error al imprimir: {str(e)}")
+        logger.error(f"Error al imprimir: {str(e)}")
         return False

@@ -17,6 +17,9 @@ from apps.inventory import models as inventory_models
 from apps.core.choices import BinStatus
 from apps.common.utils.permissions_mixins import ClientScopeMixin, StrictDjangoModelPermissions
 from . import serializers
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class EntryFilter(FilterSet):
@@ -238,7 +241,8 @@ class EntryViewSet(ClientScopeMixin, viewsets.ModelViewSet):
                 entry_detail.save(update_fields=['pdf_document'])
                 pdf_url = pdf_path
         except Exception as e:
-            print(f"Error al generar PDF para entrada {entry.code}: {e}")
+            logger.error(
+                f"Error al generar PDF para entrada {entry.code}: {e}")
 
         return Response({
             'detail': 'Entrada completada exitosamente.',
@@ -308,16 +312,16 @@ class EntryProductViewSet(ClientScopeMixin, viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         from rest_framework.exceptions import ValidationError
-        
+
         user = self.request.user
         entry = serializer.validated_data.get('entry')
-        
+
         # VALIDACIÓN: No se puede crear productos en entrada completada
         if entry and entry.status == 'completada':
             raise ValidationError(
                 'No se puede agregar productos a una entrada completada.'
             )
-        
+
         if is_client_user(user):
             # Validar que la entrada pertenezca al cliente del usuario
             if entry and entry.client_id != get_user_client_id(user):
@@ -328,7 +332,8 @@ class EntryProductViewSet(ClientScopeMixin, viewsets.ModelViewSet):
 
     def perform_update(self, serializer):
         user = self.request.user
-        entry = serializer.validated_data.get('entry', serializer.instance.entry)
+        entry = serializer.validated_data.get(
+            'entry', serializer.instance.entry)
         if is_client_user(user):
             if entry and entry.client_id != get_user_client_id(user):
                 from rest_framework.exceptions import PermissionDenied

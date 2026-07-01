@@ -1,5 +1,5 @@
 import os
-
+import logging
 from django.db import models
 from django.conf import settings
 from django.core.exceptions import ValidationError
@@ -12,6 +12,8 @@ from apps.core import choices
 from apps.common.utils.media_layout import wms_bin_tag_upload
 
 from . import services
+
+logger = logging.getLogger(__name__)
 
 
 class BaseModel(models.Model):
@@ -219,12 +221,13 @@ class Bin(BaseModel):
                     models.Model.save(self, update_fields=[
                                       'tag_image', 'zpl_code'])
             except Exception as e:
-                print(f"Error generando tag o ZPL: {str(e)}")
+                logger.error(f"Error generando tag o ZPL: {str(e)}")
 
     @staticmethod
     def generate_global_bin_code():
         last_bin = Bin.objects.order_by('id').last()
-        last_number = int(last_bin.code.split('-')[-1]) if last_bin and last_bin.code else 0
+        last_number = int(last_bin.code.split(
+            '-')[-1]) if last_bin and last_bin.code else 0
         return f"BIN-{last_number + 1:010d}"
 
     def generate_tag(self):

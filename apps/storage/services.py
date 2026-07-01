@@ -3,6 +3,9 @@ import qrcode
 from io import BytesIO
 from PIL import Image, ImageDraw, ImageFont
 from django.conf import settings
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def generate_qr_with_label(data, text, level=None, font_path=None):
@@ -36,7 +39,8 @@ def generate_qr_with_label(data, text, level=None, font_path=None):
     total_height = nivel_space + qr_height + code_space
 
     # Crear imagen en blanco
-    combined_image = Image.new("RGB", (total_width, total_height), (255, 255, 255))
+    combined_image = Image.new(
+        "RGB", (total_width, total_height), (255, 255, 255))
 
     # Pegar el QR en la posición exacta
     combined_image.paste(qr_image, (0, nivel_space))
@@ -47,7 +51,8 @@ def generate_qr_with_label(data, text, level=None, font_path=None):
         # Cargar fuentes, intentando priorizar Arial o cualquier fuente sans-serif
         font_path = font_path or os.path.join(settings.BASE_DIR, "arial.ttf")
         # Tamaños de fuente grandes para que sean similares a la imagen
-        level_font = ImageFont.truetype(font_path, 40)  # Más grande para el nivel
+        level_font = ImageFont.truetype(
+            font_path, 40)  # Más grande para el nivel
         code_font = ImageFont.truetype(font_path, 40)   # Grande para el código
     except OSError:
         try:
@@ -60,7 +65,8 @@ def generate_qr_with_label(data, text, level=None, font_path=None):
                 level_font = ImageFont.truetype("DejaVuSans", 40)
                 code_font = ImageFont.truetype("DejaVuSans", 40)
             except OSError:
-                print("No se pudo cargar ninguna fuente. Usando la fuente predeterminada.")
+                logger.error(
+                    "No se pudo cargar ninguna fuente. Usando la fuente predeterminada.")
                 level_font = ImageFont.load_default()
                 code_font = ImageFont.load_default()
 
