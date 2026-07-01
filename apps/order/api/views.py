@@ -1,7 +1,6 @@
 from rest_framework import mixins, viewsets, filters
 from apps.core.user_roles import get_user_client, get_user_client_id, is_client_user, can_manage_as_administrator
 from rest_framework.permissions import IsAuthenticated, DjangoModelPermissions
-from rest_framework.pagination import PageNumberPagination
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.exceptions import ValidationError as DRFValidationError
@@ -18,12 +17,6 @@ from apps.inventory import models as inventory_models
 from apps.core.choices import BinStatus
 from utils.permissions_mixins import ClientScopeMixin, StrictDjangoModelPermissions
 from . import serializers
-
-
-class StandardResultsSetPagination(PageNumberPagination):
-    page_size = 20
-    page_size_query_param = 'page_size'
-    max_page_size = 1000
 
 
 class EntryFilter(FilterSet):
@@ -46,7 +39,6 @@ class EntryFilter(FilterSet):
 class EntryViewSet(ClientScopeMixin, viewsets.ModelViewSet):
     queryset = order_models.Entry.objects.all().order_by('-created_at')
     serializer_class = serializers.EntrySerializer
-    pagination_class = StandardResultsSetPagination
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
     filterset_class = EntryFilter
     # Buscar por código de entrada, cliente o SKU del producto
@@ -304,7 +296,6 @@ class EntryViewSet(ClientScopeMixin, viewsets.ModelViewSet):
 class EntryProductViewSet(ClientScopeMixin, viewsets.ModelViewSet):
     queryset = order_models.EntryProduct.objects.all().order_by('-created_at')
     serializer_class = serializers.EntryProductSerializer
-    pagination_class = StandardResultsSetPagination
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
     filterset_fields = ['entry', 'is_completed']
     search_fields = ['product__name',]
@@ -393,7 +384,6 @@ class ExitFilter(FilterSet):
 class ExitViewSet(ClientScopeMixin, viewsets.ModelViewSet):
     queryset = order_models.Exit.objects.all().order_by('-created_at')
     serializer_class = serializers.ExitSerializer
-    pagination_class = StandardResultsSetPagination
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
     filterset_class = ExitFilter
     # Buscar por código de salida, cliente o SKU del producto
@@ -744,7 +734,6 @@ class ExitViewSet(ClientScopeMixin, viewsets.ModelViewSet):
 class ExitProductViewSet(ClientScopeMixin, viewsets.ModelViewSet):
     queryset = order_models.ExitProduct.objects.all().order_by('-created_at')
     serializer_class = serializers.ExitProductSerializer
-    pagination_class = StandardResultsSetPagination
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
     filterset_fields = ['exit_product_group__exit', 'is_picking']
     search_fields = ['bin_product__entry_product__product__name']
@@ -1043,7 +1032,6 @@ class ExitDetailViewSet(ClientScopeMixin, mixins.CreateModelMixin,
 class ExitProductGroupViewSet(ClientScopeMixin, viewsets.ModelViewSet):
     queryset = order_models.ExitProductGroup.objects.all().order_by('-created_at')
     serializer_class = serializers.ExitProductGroupSerializer
-    pagination_class = StandardResultsSetPagination
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
     filterset_fields = ['exit', 'product']
     search_fields = ['product__name']

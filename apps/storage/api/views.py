@@ -6,7 +6,7 @@ from utils.permissions_mixins import DenyClientUsers, StrictDjangoModelPermissio
 from apps.workspaces.tenant import get_workspace_for_request
 from rest_framework.decorators import action
 from rest_framework.response import Response
-from rest_framework.pagination import PageNumberPagination
+from apps.common.pagination import MediumPagination
 from django_filters.rest_framework import DjangoFilterBackend
 from django.core.files import File
 from django.db.models import Prefetch, Q
@@ -18,16 +18,10 @@ from utils.zebra import print_to_zebra
 from . import serializers
 
 
-class StandardResultsSetPagination(PageNumberPagination):
-    page_size = 50
-    page_size_query_param = 'page_size'
-    max_page_size = 1000
-
-
 class StorageViewSet(WorkspaceScopeMixin, viewsets.ModelViewSet):
     queryset = storage_models.Storage.objects.all().order_by("-created_at")
     serializer_class = serializers.StorageSerializer
-    pagination_class = StandardResultsSetPagination
+    pagination_class = MediumPagination
     permission_classes = [IsAuthenticated]
     filter_backends = [filters.SearchFilter]
     search_fields = ["name"]
@@ -45,7 +39,7 @@ class StorageViewSet(WorkspaceScopeMixin, viewsets.ModelViewSet):
 class CavaViewSet(WorkspaceScopeMixin, viewsets.ModelViewSet):
     queryset = storage_models.Cava.objects.select_related("storage").all().order_by("-created_at")
     serializer_class = serializers.CavaSerializer
-    pagination_class = StandardResultsSetPagination
+    pagination_class = MediumPagination
     permission_classes = [IsAuthenticated, StrictDjangoModelPermissions]
     workspace_field = "storage__workspace"
     filter_backends = [filters.SearchFilter]
@@ -58,7 +52,7 @@ class CavaViewSet(WorkspaceScopeMixin, viewsets.ModelViewSet):
 class PositionViewSet(WorkspaceScopeMixin, viewsets.ModelViewSet):
     queryset = storage_models.Position.objects.all().order_by('code')
     serializer_class = serializers.PositionSerializer
-    pagination_class = StandardResultsSetPagination
+    pagination_class = MediumPagination
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
     filterset_fields = ['status', 'hall', 'cava', 'is_active']
     search_fields = ['code',]

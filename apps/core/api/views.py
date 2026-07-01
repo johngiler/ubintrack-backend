@@ -7,7 +7,6 @@ from rest_framework.authtoken.models import Token
 from rest_framework.response import Response
 from rest_framework.exceptions import ValidationError, PermissionDenied
 from django.db.models import Count
-from rest_framework.pagination import PageNumberPagination
 from django_filters.rest_framework import DjangoFilterBackend
 
 from apps.core import models as core_models
@@ -21,12 +20,6 @@ from apps.workspaces.tenant import get_workspace_for_request, is_platform_staff,
 
 LOGIN_FAILED_MESSAGE = "Credenciales inválidas"
 from . import serializers
-
-
-class StandardResultsSetPagination(PageNumberPagination):
-    page_size = 20
-    page_size_query_param = 'page_size'
-    max_page_size = 1000
 
 
 class CustomObtainAuthToken(ObtainAuthToken):
@@ -66,7 +59,6 @@ class CustomUserViewSet(WorkspaceScopeMixin, viewsets.ModelViewSet):
     queryset = core_models.CustomUser.objects.select_related(
         "profile", "client", "workspace"
     ).order_by("-date_joined")
-    pagination_class = StandardResultsSetPagination
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
     filterset_fields = ["user_type", "client", "is_active"]
     search_fields = ["email", "full_name"]
@@ -108,7 +100,6 @@ class ProfileViewSet(WorkspaceScopeMixin, viewsets.ModelViewSet):
         users_count=Count("custom_users")
     ).order_by("-created_at")
     serializer_class = serializers.ProfileSerializer
-    pagination_class = StandardResultsSetPagination
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
     filterset_fields = ["is_active", "user_type"]
     search_fields = ["name"]
@@ -140,7 +131,6 @@ class CustomPermissionViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
 class ClientViewSet(ClientScopeMixin, viewsets.ModelViewSet):
     queryset = core_models.Client.objects.all().order_by("-created_at")
     serializer_class = serializers.ClientSerializer
-    pagination_class = StandardResultsSetPagination
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
     filterset_fields = ["id", "is_active", "tariff"]
     search_fields = ["name"]
@@ -164,7 +154,6 @@ class ClientViewSet(ClientScopeMixin, viewsets.ModelViewSet):
 class BranchViewSet(WorkspaceScopeMixin, viewsets.ModelViewSet):
     queryset = core_models.Branch.objects.select_related("client").all().order_by('-created_at')
     serializer_class = serializers.BranchSerializer
-    pagination_class = StandardResultsSetPagination
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
     filterset_fields = ['client',]
     search_fields = ['name']

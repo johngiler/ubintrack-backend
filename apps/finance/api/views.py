@@ -3,7 +3,6 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from utils.permissions_mixins import StrictDjangoModelPermissions, DenyClientUsers
-from rest_framework.pagination import PageNumberPagination
 from django_filters.rest_framework import DjangoFilterBackend
 from apps.finance import models as finance_models
 from apps.finance import services as finance_services
@@ -12,16 +11,9 @@ from datetime import datetime
 from . import serializers
 
 
-class StandardResultsSetPagination(PageNumberPagination):
-    page_size = 20
-    page_size_query_param = 'page_size'
-    max_page_size = 1000
-
-
 class TariffViewSet(viewsets.ModelViewSet):
     queryset = finance_models.Tariff.objects.all().order_by('-created_at')
     serializer_class = serializers.TariffSerializer
-    pagination_class = StandardResultsSetPagination
     permission_classes = [IsAuthenticated,
                           DenyClientUsers, StrictDjangoModelPermissions]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
@@ -41,7 +33,6 @@ class BillingCalculationViewSet(viewsets.ViewSet):
     - Daily inventory average (integrated from averages)
     """
     permission_classes = [IsAuthenticated, DenyClientUsers]
-    pagination_class = StandardResultsSetPagination
 
     def _get_date_range_from_params(self, request):
         """

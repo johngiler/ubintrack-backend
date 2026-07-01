@@ -1,7 +1,6 @@
 from rest_framework import viewsets, filters, status
 from apps.core.user_roles import get_user_client, get_user_client_id, is_client_user, can_manage_as_administrator
 from rest_framework.permissions import IsAuthenticated, DjangoModelPermissions
-from rest_framework.pagination import PageNumberPagination
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.parsers import MultiPartParser, FormParser
@@ -25,16 +24,9 @@ class CategoryViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = serializers.CategorySerializer
 
 
-class StandardResultsSetPagination(PageNumberPagination):
-    page_size = 20
-    page_size_query_param = 'page_size'
-    max_page_size = 1000
-
-
 class ProductViewSet(ClientScopeMixin, viewsets.ModelViewSet):
     queryset = inventory_models.Product.objects.all().order_by('-created_at')
     serializer_class = serializers.ProductSerializer
-    pagination_class = StandardResultsSetPagination
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
     filterset_fields = ['client', 'category', 'rotation_type',
                         'condition', 'is_picking', 'is_active']
@@ -75,7 +67,6 @@ class ProductViewSet(ClientScopeMixin, viewsets.ModelViewSet):
 class BinViewSet(ClientScopeMixin, viewsets.ModelViewSet):
     queryset = inventory_models.Bin.objects.all().order_by('-created_at')
     serializer_class = serializers.BinSerializer
-    pagination_class = StandardResultsSetPagination
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
     filterset_fields = ['status', 'is_active']
     # Buscar por código de bin o SKU del producto
