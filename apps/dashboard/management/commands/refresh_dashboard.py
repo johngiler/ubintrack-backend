@@ -1,6 +1,6 @@
 from django.core.management.base import BaseCommand
 
-from apps.dashboard.refresh import refresh_dashboard_aggregates
+from apps.dashboard.services import refresh_dashboard_aggregates
 
 
 class Command(BaseCommand):
