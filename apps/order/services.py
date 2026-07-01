@@ -7,14 +7,13 @@ import xlwt
 from django.db import transaction
 from django.core.exceptions import ValidationError
 from django.utils import timezone
-from django.conf import settings
 from django.db import connection
 from django.db.models import prefetch_related_objects
 from django.db.utils import OperationalError
 from io import BytesIO
 from reportlab.lib.pagesizes import letter
 from reportlab.lib import colors
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image, Table, TableStyle
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import inch
 from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_RIGHT
@@ -26,6 +25,11 @@ from apps.common.utils.media_layout import (
     build_wms_entry_pdf_relative,
     build_wms_exit_pdf_relative,
     ensure_media_parent_dir,
+)
+from apps.common.utils.pdf_branding import (
+    append_workspace_logo,
+    workspace_display_name,
+    workspace_pdf_footer_paragraphs,
 )
 
 
@@ -1089,6 +1093,7 @@ def generate_exit_pdf(exit_instance):
 
     # Pre-cargar las relaciones para evitar consultas N+1
     prefetch_related_objects([exit_instance],
+                             'client__workspace',
                              'exit_product_groups',
                              'exit_product_groups__product',
                              'exit_product_groups__exit_products',
@@ -1130,17 +1135,10 @@ def generate_exit_pdf(exit_instance):
 
     # Elementos para el PDF
     elements = []
+    workspace = getattr(exit_instance.client, "workspace", None)
+    owner_label = workspace_display_name(workspace)
 
-    # Logo
-    logo_path = os.path.join(
-        settings.BASE_DIR, "static", "logo", "rbcold-logo.png")
-    if os.path.exists(logo_path):
-        img = Image(logo_path, width=1.5*inch, height=1.5*inch)
-        img.hAlign = 'CENTER'
-        elements.append(img)
-    else:
-        # Si no se encuentra el logo, agregar un texto alternativo
-        elements.append(Paragraph("RB COLD CHAIN", styles["CenterTitle"]))
+    append_workspace_logo(elements, workspace, styles["CenterTitle"], size=1.5)
 
     # Título
     elements.append(Spacer(1, 0.75*inch))
@@ -1302,7 +1300,7 @@ def generate_exit_pdf(exit_instance):
     signature_data = [
         ["____________________", "____________________"],
         ["Entregado por", "Recibido por"],
-        ["RB Cold Chain", "Cliente"]
+        [owner_label, "Cliente"]
     ]
 
     signature_table = Table(signature_data, colWidths=[2.5*inch, 2.5*inch])
@@ -1313,13 +1311,10 @@ def generate_exit_pdf(exit_instance):
 
     elements.append(signature_table)
 
-    # Pie de página con información de la empresa
-    elements.append(Spacer(1, 0.75*inch))
-    elements.append(
-        Paragraph("Pan América Corporate Center Galera 9095, local 6, Howard Panamá Pacífico, Panamá",
-                  styles["LeftHeading"]))
-    elements.append(
-        Paragraph("<u>www.rbcold.com</u>", styles["LeftHeading"]))
+    footer = workspace_pdf_footer_paragraphs(workspace, styles["LeftHeading"])
+    if footer:
+        elements.append(Spacer(1, 0.75*inch))
+        elements.extend(footer)
 
     # Generar PDF
     doc.build(elements)
@@ -1395,6 +1390,7 @@ def generate_entry_pdf(entry_instance):
 
     # Pre-cargar las relaciones para evitar consultas N+1
     prefetch_related_objects([entry_instance],
+                             'client__workspace',
                              'entry_products',
                              'entry_products__product')
 
@@ -1436,17 +1432,10 @@ def generate_entry_pdf(entry_instance):
 
     # Elementos para el PDF
     elements = []
+    workspace = getattr(entry_instance.client, "workspace", None)
+    owner_label = workspace_display_name(workspace)
 
-    # Logo
-    logo_path = os.path.join(
-        settings.BASE_DIR, "static", "logo", "rbcold-logo.png")
-    if os.path.exists(logo_path):
-        img = Image(logo_path, width=1.5*inch, height=1.5*inch)
-        img.hAlign = 'CENTER'
-        elements.append(img)
-    else:
-        # Si no se encuentra el logo, agregar un texto alternativo
-        elements.append(Paragraph("RB COLD CHAIN", styles["CenterTitle"]))
+    append_workspace_logo(elements, workspace, styles["CenterTitle"], size=1.5)
 
     # Título
     elements.append(Spacer(1, 0.75*inch))
@@ -1620,7 +1609,7 @@ def generate_entry_pdf(entry_instance):
     signature_data = [
         ["____________________", "____________________"],
         ["Recibido por", "Entregado por"],
-        ["RB Cold Chain", "Cliente"]
+        [owner_label, "Cliente"]
     ]
 
     signature_table = Table(signature_data, colWidths=[2.5*inch, 2.5*inch])
@@ -1631,13 +1620,10 @@ def generate_entry_pdf(entry_instance):
 
     elements.append(signature_table)
 
-    # Pie de página con información de la empresa
-    elements.append(Spacer(1, 0.75*inch))
-    elements.append(
-        Paragraph("Pan América Corporate Center Galera 9095, local 6, Howard Panamá Pacífico, Panamá",
-                  styles["LeftHeading"]))
-    elements.append(
-        Paragraph("<u>www.rbcold.com</u>", styles["LeftHeading"]))
+    footer = workspace_pdf_footer_paragraphs(workspace, styles["LeftHeading"])
+    if footer:
+        elements.append(Spacer(1, 0.75*inch))
+        elements.extend(footer)
 
     # Generar PDF
     doc.build(elements)

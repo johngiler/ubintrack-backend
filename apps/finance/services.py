@@ -1831,26 +1831,9 @@ def serialize_billing_data(billing_data):
 
 
 def _workspace_logo_image(workspace, fallback_style, size=1.1):
-    """Carga logo del workspace para PDF o devuelve Paragraph con nombre."""
-    from reportlab.lib.units import inch
-    from reportlab.platypus import Image, Paragraph
-
-    if workspace is None:
-        return Paragraph('<b>Ubintrack</b>', fallback_style)
-
-    for attr in ('logo', 'logo_mark'):
-        field = getattr(workspace, attr, None)
-        if not field:
-            continue
-        try:
-            with field.open('rb') as fh:
-                buf = BytesIO(fh.read())
-            return Image(buf, width=size * inch, height=size * inch)
-        except Exception:
-            continue
-
-    label = workspace.legal_name or workspace.name
-    return Paragraph(f'<b>{label}</b>', fallback_style)
+    """Compat: delega en helper compartido."""
+    from apps.common.utils.pdf_branding import workspace_logo_flowable
+    return workspace_logo_flowable(workspace, fallback_style, size=size)
 
 
 def generate_invoice_pdf(invoice, billing_data):
