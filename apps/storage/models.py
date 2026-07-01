@@ -129,8 +129,7 @@ class Position(BaseModel):
 
     def save(self, *args, **kwargs):
         if not self.code:
-            cv = self.cava.name.split()
-            cava_code = f"{cv[0][0]}{cv[1][0]}"
+            cava_code = services.cava_code_prefix(self.cava.name if self.cava else "")
             hall_code = f"P{self.hall}"
             rack_code = f"R{self.rack}"
             level_code = f"N{self.level}"

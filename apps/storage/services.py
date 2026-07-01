@@ -104,6 +104,17 @@ def generate_qr_with_label(data, text, level=None, font_path=None):
     return buffer
 
 
+def cava_code_prefix(name: str) -> str:
+    """Prefijo de 2 caracteres para códigos de posición (p. ej. «Cava 1» → «C1»)."""
+    parts = (name or "").split()
+    if len(parts) >= 2:
+        return f"{parts[0][0]}{parts[1][0]}".upper()
+    s = (name or "XX").strip().upper()
+    if len(s) >= 2:
+        return s[:2]
+    return s.ljust(2, "X")
+
+
 def generate_rack_list(number):
     return [(i, f'Rack {i}') for i in range(1, number + 1)]
 

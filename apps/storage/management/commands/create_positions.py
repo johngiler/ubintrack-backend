@@ -1,6 +1,7 @@
 import re
 from django.core.management.base import BaseCommand
 from apps.storage.models import Position, Cava
+from apps.storage import services
 from apps.core.choices import PositionStatus
 
 
@@ -52,8 +53,7 @@ class Command(BaseCommand):
                 cava = None
 
                 for c in cavas:
-                    cv = c.name.split()
-                    if len(cv) >= 2 and f"{cv[0][0]}{cv[1][0]}" == cava_code:
+                    if services.cava_code_prefix(c.name) == cava_code:
                         cava = c
                         break
 

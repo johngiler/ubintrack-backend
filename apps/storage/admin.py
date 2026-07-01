@@ -6,7 +6,10 @@ from . import models
 
 @admin.register(models.Storage)
 class StorageAdmin(admin.ModelAdmin):
-    list_display = ('name',)
+    list_display = ("name", "workspace", "is_active")
+    list_filter = ("workspace", "is_active")
+    search_fields = ("name", "workspace__slug")
+    autocomplete_fields = ("workspace",)
 
 
 @admin.register(models.Cava)

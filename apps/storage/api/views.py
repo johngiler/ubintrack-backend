@@ -1,6 +1,6 @@
 from rest_framework import viewsets, filters, status
 from rest_framework.exceptions import ValidationError
-from apps.core.utils.user_roles import get_user_client, is_client_user, can_manage_as_administrator
+from apps.core.utils.user_roles import is_client_user
 from rest_framework.permissions import IsAuthenticated
 from apps.common.utils.permissions_mixins import DenyClientUsers, StrictDjangoModelPermissions, WorkspaceScopeMixin
 from apps.workspaces.utils.tenant import get_workspace_for_request
