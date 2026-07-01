@@ -91,49 +91,6 @@ def calculate_bin_storage_cost(bin, tariff, period_start=None, period_end=None):
     return days * daily_rate, days
 
 
-def get_date_range(period='current_month'):
-    """
-    Get start and end dates for the specified period.
-
-    Periods:
-    - current_month: Current month
-    - 3_months: Last 3 months
-    - 6_months: Last 6 months
-    - 1_year: Last 12 months
-    """
-    now = timezone.now()
-
-    if period == 'current_month':
-        start_date = now.replace(
-            day=1, hour=0, minute=0, second=0, microsecond=0)
-        # Last day of current month
-        next_month = add_months(start_date, 1)
-        end_date = next_month - timedelta(seconds=1)
-    elif period == '3_months':
-        start_date = add_months(now, -3)
-        start_date = start_date.replace(
-            day=1, hour=0, minute=0, second=0, microsecond=0)
-        end_date = now
-    elif period == '6_months':
-        start_date = add_months(now, -6)
-        start_date = start_date.replace(
-            day=1, hour=0, minute=0, second=0, microsecond=0)
-        end_date = now
-    elif period == '1_year':
-        start_date = add_months(now, -12)
-        start_date = start_date.replace(
-            day=1, hour=0, minute=0, second=0, microsecond=0)
-        end_date = now
-    else:
-        # Default to current month
-        start_date = now.replace(
-            day=1, hour=0, minute=0, second=0, microsecond=0)
-        next_month = add_months(start_date, 1)
-        end_date = next_month - timedelta(seconds=1)
-
-    return start_date, end_date
-
-
 def calculate_client_billing(client_id, start_date=None, end_date=None):
     """
     Calculate billing for a specific client within a date range.
@@ -336,7 +293,6 @@ def calculate_client_billing(client_id, start_date=None, end_date=None):
         },
         'additional_services': {
             'total_cost': Decimal('0.00'),
-            'crossdocking': {'cost': Decimal('0.00'), 'count': 0},
             'restiba': {'cost': Decimal('0.00'), 'count': 0},
             'wrap': {'cost': Decimal('0.00'), 'count': 0},
             'added_pallet': {'cost': Decimal('0.00'), 'count': 0},
@@ -744,22 +700,26 @@ def calculate_client_monthly_history(client_id, months=12):
     }
 
 
-def calculate_general_billing_summary(start_date=None, end_date=None):
+def calculate_general_billing_summary(start_date=None, end_date=None, workspace=None):
     """
     Calculate general billing summary for all clients within a date range.
     Returns aggregated data for dashboard.
 
-    If start_date and end_date are None, calculates for all time.
+    If workspace is provided, only clients of that owner are included.
     """
-    from apps.storage.models import Position, Cava
-    
+    from apps.storage.models import Position
+
     clients = Client.objects.filter(is_active=True).select_related('tariff')
-    
-    # Total de posiciones físicas (excluyendo cavas virtuales)
-    total_positions = Position.objects.filter(
+    if workspace is not None:
+        clients = clients.filter(workspace=workspace)
+
+    positions_qs = Position.objects.filter(
         cava__is_virtual=False,
-        is_active=True
-    ).count()
+        is_active=True,
+    )
+    if workspace is not None:
+        positions_qs = positions_qs.filter(cava__storage__workspace=workspace)
+    total_positions = positions_qs.count()
 
     summary = {
         'total_clients': clients.count(),
@@ -1870,6 +1830,29 @@ def serialize_billing_data(billing_data):
     return convert_decimal(billing_data)
 
 
+def _workspace_logo_image(workspace, fallback_style, size=1.1):
+    """Carga logo del workspace para PDF o devuelve Paragraph con nombre."""
+    from reportlab.lib.units import inch
+    from reportlab.platypus import Image, Paragraph
+
+    if workspace is None:
+        return Paragraph('<b>Ubintrack</b>', fallback_style)
+
+    for attr in ('logo', 'logo_mark'):
+        field = getattr(workspace, attr, None)
+        if not field:
+            continue
+        try:
+            with field.open('rb') as fh:
+                buf = BytesIO(fh.read())
+            return Image(buf, width=size * inch, height=size * inch)
+        except Exception:
+            continue
+
+    label = workspace.legal_name or workspace.name
+    return Paragraph(f'<b>{label}</b>', fallback_style)
+
+
 def generate_invoice_pdf(invoice, billing_data):
     """
     Genera el PDF del comprobante de factura electrónica.
@@ -1983,14 +1966,11 @@ def generate_invoice_pdf(invoice, billing_data):
     )
     
     elements = []
-    
+
+    workspace = getattr(getattr(invoice, 'client', None), 'workspace', None)
+
     # === ENCABEZADO ===
-    # Logo
-    logo_path = os.path.join(settings.BASE_DIR, "static", "logo", "rbcold-logo.png")
-    if os.path.exists(logo_path):
-        logo_img = Image(logo_path, width=1.1*inch, height=1.1*inch)
-    else:
-        logo_img = Paragraph('<b>RB COLD CHAIN</b>', bold_style)
+    logo_img = _workspace_logo_image(workspace, bold_style)
     
     # Título DGI (centro)
     dgi_content = [
@@ -2008,9 +1988,14 @@ def generate_invoice_pdf(invoice, billing_data):
         border=2,
     )
     # Datos del QR: URL de verificación con parámetros del comprobante
+    emisor_name = (workspace.legal_name or workspace.name) if workspace else 'N/A'
+    emisor_ruc = workspace.rif if workspace and workspace.rif else 'N/A'
+    support_email = workspace.support_email if workspace and workspace.support_email else 'N/A'
+    emisor_phone = workspace.phone if workspace and workspace.phone else ''
+
     qr_data = f"""https://dgi-fep.mef.gob.pa/Consultas/FacturasPorCUFE
 Número: {invoice.number}
-Emisor RUC: 155667320-2-2018
+Emisor RUC: {emisor_ruc}
 Receptor RUC: {invoice.client_ruc}
 Fecha: {invoice.created_at.strftime('%d-%m-%Y')}
 Total: {invoice.total}"""
@@ -2036,9 +2021,9 @@ Total: {invoice.total}"""
     elements.append(Spacer(1, 0.15*inch))
     
     # === DATOS DEL EMISOR (sin recuadro, texto simple) ===
-    emisor_text = f"""<b>Emisor:</b>  RB COLD CHAIN, INC<br/>
-<b>RUC:</b> 155667320-2-2018    <b>DV:</b> 61<br/>
-<b>Dirección:</b> Howard, Edf 9095, Local 6, Pan América, Corporate Center, Panamá Pacífico"""
+    phone_line = f'<br/><b>Teléfono:</b> {emisor_phone}' if emisor_phone else ''
+    emisor_text = f"""<b>Emisor:</b>  {emisor_name}<br/>
+<b>RUC:</b> {emisor_ruc}{phone_line}"""
     elements.append(Paragraph(emisor_text, normal_style))
     elements.append(Spacer(1, 0.15*inch))
     
@@ -2204,7 +2189,7 @@ Total: {invoice.total}"""
         [Paragraph('<b>Datos de Pago:</b>', small_style), ''],
         [Paragraph('<b>Banco:</b>', small_style), Paragraph('BANCO GENERAL · Cuenta corriente', small_style)],
         [Paragraph('<b>Cuenta:</b>', small_style), Paragraph('03-01-01-123185-9', small_style)],
-        [Paragraph('<b>Correo:</b>', small_style), Paragraph('gloriamoreno@rbcold.com', small_style)],
+        [Paragraph('<b>Correo:</b>', small_style), Paragraph(support_email, small_style)],
         ['', ''],
         [Paragraph('PUEDE CONSULTAR LA VALIDEZ DEL DOCUMENTO ESCANEANDO EL CODIGO QR', small_style), ''],
     ]

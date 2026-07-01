@@ -10,7 +10,7 @@ class TariffSerializer(serializers.ModelSerializer):
     class Meta:
         model = finance_models.Tariff
         fields = [
-            'id', 'name',
+            'id', 'name', 'workspace',
             # Entry/Exit rates by condition - FROZEN
             'in_pallet_frozen', 'in_floor_frozen', 'out_frozen',
             # Entry/Exit rates by condition - REFRIGERATED
@@ -20,13 +20,13 @@ class TariffSerializer(serializers.ModelSerializer):
             # Storage rates (monthly)
             'refrigerated_storage', 'frozen_storage', 'dry_storage',
             # Services
-            'picking', 'has_picking_tariff', 'crossdocking', 'restiba', 'added_pallet', 'wrap',
+            'picking', 'has_picking_tariff', 'restiba', 'added_pallet', 'wrap',
             # Dynamic/Static tariff configuration
-            'rotation_threshold', 'static_penalty_rate', 'monthly_storage_rate',
+            'rotation_threshold', 'static_penalty_rate',
             # Timestamps
             'created_at', 'updated_at'
         ]
-        read_only_fields = ['created_at', 'updated_at']
+        read_only_fields = ['workspace', 'created_at', 'updated_at']
 
 
 class BillingCalculationSerializer(serializers.Serializer):
@@ -159,8 +159,15 @@ class InvoiceSerializer(serializers.ModelSerializer):
         read_only_fields = ['created_at', 'created_by', 'next_number']
     
     def get_next_number(self, obj):
-        """Retorna el próximo número de comprobante disponible."""
-        return finance_models.Invoice.get_next_number()
+        """Retorna el próximo número de comprobante disponible para el owner."""
+        workspace = None
+        if obj and getattr(obj, 'client', None):
+            workspace = getattr(obj.client, 'workspace', None)
+        request = self.context.get('request')
+        if workspace is None and request:
+            from apps.workspaces.utils.tenant import get_workspace_for_request
+            workspace = get_workspace_for_request(request)
+        return finance_models.Invoice.get_next_number(workspace)
 
 
 class InvoiceCreateSerializer(serializers.Serializer):

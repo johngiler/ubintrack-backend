@@ -254,8 +254,11 @@ class Client(BaseModel):
         super().delete(*args, **kwargs)
 
     def save(self, *args, **kwargs):
-        if not self.tariff_id:
-            default_tariff = Tariff.objects.filter(name="General").first()
+        if not self.tariff_id and self.workspace_id:
+            default_tariff = Tariff.objects.filter(
+                name="General",
+                workspace_id=self.workspace_id,
+            ).first()
             if default_tariff:
                 self.tariff = default_tariff
         if not self.random_id:

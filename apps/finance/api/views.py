@@ -2,16 +2,22 @@ from rest_framework import viewsets, status, filters
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
-from apps.common.utils.permissions_mixins import StrictDjangoModelPermissions, DenyClientUsers
+from rest_framework.exceptions import NotFound, ValidationError
+from apps.common.utils.permissions_mixins import (
+    StrictDjangoModelPermissions,
+    DenyClientUsers,
+    WorkspaceScopeMixin,
+)
 from django_filters.rest_framework import DjangoFilterBackend
 from apps.finance import models as finance_models
 from apps.finance import services as finance_services
 from apps.core.models import Client
+from apps.workspaces.utils.tenant import get_workspace_for_request
 from datetime import datetime
 from . import serializers
 
 
-class TariffViewSet(viewsets.ModelViewSet):
+class TariffViewSet(WorkspaceScopeMixin, viewsets.ModelViewSet):
     queryset = finance_models.Tariff.objects.all().order_by('-created_at')
     serializer_class = serializers.TariffSerializer
     permission_classes = [IsAuthenticated,
@@ -21,6 +27,16 @@ class TariffViewSet(viewsets.ModelViewSet):
     filterset_fields = ['has_picking_tariff']
     ordering_fields = ['name', 'created_at', 'updated_at']
     ordering = ['-created_at']
+    workspace_field = 'workspace'
+
+    def get_queryset(self):
+        return self.scope_to_workspace(super().get_queryset())
+
+    def perform_create(self, serializer):
+        ws = get_workspace_for_request(self.request)
+        if ws is None:
+            raise ValidationError({'detail': 'Owner no resuelto.'})
+        serializer.save(workspace=ws)
 
 
 class BillingCalculationViewSet(viewsets.ViewSet):
@@ -33,6 +49,19 @@ class BillingCalculationViewSet(viewsets.ViewSet):
     - Daily inventory average (integrated from averages)
     """
     permission_classes = [IsAuthenticated, DenyClientUsers]
+
+    def _require_workspace(self, request):
+        ws = get_workspace_for_request(request)
+        if ws is None:
+            raise ValidationError({'detail': 'Owner no resuelto.'})
+        return ws
+
+    def _get_client_in_workspace(self, request, pk):
+        ws = self._require_workspace(request)
+        try:
+            return Client.objects.select_related('workspace').get(id=pk, workspace=ws)
+        except Client.DoesNotExist:
+            raise NotFound({'error': 'Cliente no encontrado'})
 
     def _get_date_range_from_params(self, request):
         """
@@ -86,9 +115,10 @@ class BillingCalculationViewSet(viewsets.ViewSet):
         GET /api/billing/summary/?start_date=2024-11-26&end_date=2024-12-26
         """
         start_date, end_date = self._get_date_range_from_params(request)
+        workspace = self._require_workspace(request)
 
         summary = finance_services.calculate_general_billing_summary(
-            start_date, end_date)
+            start_date, end_date, workspace=workspace)
         serializer = serializers.BillingSummarySerializer(summary)
         return Response(serializer.data)
 
@@ -104,6 +134,7 @@ class BillingCalculationViewSet(viewsets.ViewSet):
         from calendar import monthrange
         
         start_date, end_date = self._get_date_range_from_params(request)
+        workspace = self._require_workspace(request)
 
         # Calcular período anterior (un mes antes)
         def subtract_month(dt):
@@ -123,12 +154,12 @@ class BillingCalculationViewSet(viewsets.ViewSet):
 
         # Obtener datos del período actual
         summary = finance_services.calculate_general_billing_summary(
-            start_date, end_date)
+            start_date, end_date, workspace=workspace)
         clients_data = summary['clients_summary']
 
         # Obtener datos del período anterior
         prev_summary = finance_services.calculate_general_billing_summary(
-            prev_start_date, prev_end_date)
+            prev_start_date, prev_end_date, workspace=workspace)
         prev_clients_data = {c['client_id']: c for c in prev_summary['clients_summary']}
 
         # Combinar datos actuales con período anterior
@@ -169,14 +200,7 @@ class BillingCalculationViewSet(viewsets.ViewSet):
 
         GET /api/billing/{client_id}/calculate/?start_date=2024-11-26&end_date=2024-12-26
         """
-        try:
-            client = Client.objects.get(id=pk)
-        except Client.DoesNotExist:
-            return Response(
-                {'error': 'Cliente no encontrado'},
-                status=status.HTTP_404_NOT_FOUND
-            )
-
+        client = self._get_client_in_workspace(request, pk)
         start_date, end_date = self._get_date_range_from_params(request)
 
         billing_data = finance_services.calculate_client_billing(
@@ -199,14 +223,7 @@ class BillingCalculationViewSet(viewsets.ViewSet):
 
         GET /api/billing/{client_id}/average/?start_date=2024-11-26&end_date=2024-12-26&storage_type=all
         """
-        try:
-            client = Client.objects.get(id=pk)
-        except Client.DoesNotExist:
-            return Response(
-                {'error': 'Cliente no encontrado'},
-                status=status.HTTP_404_NOT_FOUND
-            )
-
+        client = self._get_client_in_workspace(request, pk)
         start_date_str = request.query_params.get('start_date')
         end_date_str = request.query_params.get('end_date')
         storage_type = request.query_params.get('storage_type', 'all')
@@ -259,14 +276,7 @@ class BillingCalculationViewSet(viewsets.ViewSet):
         """
         from django.http import HttpResponse
 
-        try:
-            client = Client.objects.get(id=pk)
-        except Client.DoesNotExist:
-            return Response(
-                {'error': 'Cliente no encontrado'},
-                status=status.HTTP_404_NOT_FOUND
-            )
-
+        client = self._get_client_in_workspace(request, pk)
         start_date_str = request.query_params.get('start_date')
         end_date_str = request.query_params.get('end_date')
         storage_type = request.query_params.get('storage_type', 'all')
@@ -319,14 +329,7 @@ class BillingCalculationViewSet(viewsets.ViewSet):
         Params:
         - months: Number of months to retrieve (default: 12)
         """
-        try:
-            client = Client.objects.get(id=pk)
-        except Client.DoesNotExist:
-            return Response(
-                {'error': 'Cliente no encontrado'},
-                status=status.HTTP_404_NOT_FOUND
-            )
-
+        client = self._get_client_in_workspace(request, pk)
         months = int(request.query_params.get('months', 12))
         history_data = finance_services.calculate_client_monthly_history(
             pk, months)
@@ -352,14 +355,7 @@ class BillingCalculationViewSet(viewsets.ViewSet):
         """
         from django.http import HttpResponse
 
-        try:
-            client = Client.objects.get(id=pk)
-        except Client.DoesNotExist:
-            return Response(
-                {'error': 'Cliente no encontrado'},
-                status=status.HTTP_404_NOT_FOUND
-            )
-
+        client = self._get_client_in_workspace(request, pk)
         start_date_str = request.query_params.get('start_date')
         end_date_str = request.query_params.get('end_date')
 
@@ -408,7 +404,8 @@ class BillingCalculationViewSet(viewsets.ViewSet):
         
         GET /api/billing/{client_id}/invoice/next-number/
         """
-        next_number = finance_models.Invoice.get_next_number()
+        client = self._get_client_in_workspace(request, pk)
+        next_number = finance_models.Invoice.get_next_number(client.workspace)
         return Response({'next_number': next_number})
 
     @action(detail=True, methods=['post'], url_path='invoice/generate')
@@ -429,14 +426,7 @@ class BillingCalculationViewSet(viewsets.ViewSet):
         """
         from django.http import HttpResponse
         
-        try:
-            client = Client.objects.get(id=pk)
-        except Client.DoesNotExist:
-            return Response(
-                {'error': 'Cliente no encontrado'},
-                status=status.HTTP_404_NOT_FOUND
-            )
-
+        client = self._get_client_in_workspace(request, pk)
         # Validar datos del request
         create_serializer = serializers.InvoiceCreateSerializer(data=request.data)
         if not create_serializer.is_valid():
@@ -460,7 +450,7 @@ class BillingCalculationViewSet(viewsets.ViewSet):
         # Generar número de comprobante si no se proporcionó
         invoice_number = data.get('number', '').strip()
         if not invoice_number:
-            invoice_number = finance_models.Invoice.get_next_number()
+            invoice_number = finance_models.Invoice.get_next_number(client.workspace)
         
         # Verificar que el número no exista
         if finance_models.Invoice.objects.filter(number=invoice_number).exists():
@@ -489,6 +479,10 @@ class BillingCalculationViewSet(viewsets.ViewSet):
             created_by=request.user
         )
         
+        invoice = finance_models.Invoice.objects.select_related(
+            'client__workspace',
+        ).get(pk=invoice.pk)
+
         # Generar el PDF
         pdf_buffer = finance_services.generate_invoice_pdf(invoice, billing_data)
         
@@ -517,14 +511,7 @@ class BillingCalculationViewSet(viewsets.ViewSet):
         
         GET /api/billing/{client_id}/invoices/
         """
-        try:
-            client = Client.objects.get(id=pk)
-        except Client.DoesNotExist:
-            return Response(
-                {'error': 'Cliente no encontrado'},
-                status=status.HTTP_404_NOT_FOUND
-            )
-        
+        client = self._get_client_in_workspace(request, pk)        
         invoices = finance_models.Invoice.objects.filter(client=client).order_by('-created_at')
         serializer = serializers.InvoiceSerializer(invoices, many=True)
         return Response(serializer.data)

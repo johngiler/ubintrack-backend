@@ -114,9 +114,6 @@ class Tariff(models.Model):
         default=False,
         verbose_name='Tarifa Picking Activa',
         help_text='Si está activo, se multiplica el total de cajas de cada bin por el valor de picking')
-    crossdocking = models.DecimalField(
-        max_digits=10, decimal_places=2, default=0,
-        verbose_name='Crossdocking')
     restiba = models.DecimalField(
         max_digits=10, decimal_places=2, default=0,
         verbose_name='Restiba')
@@ -138,12 +135,6 @@ class Tariff(models.Model):
         verbose_name='Tasa de penalización estática',
         help_text='Porcentaje de entrada/salida que se cobra en tarifa estática (0.80 = 80%)')
 
-    # Tarifa mensual fija de almacenamiento (usada en cálculo estático)
-    monthly_storage_rate = models.DecimalField(
-        max_digits=10, decimal_places=2, default=0,
-        verbose_name='Tarifa mensual de almacenamiento',
-        help_text='Tarifa fija mensual por pallet (usado en cálculo estático)')
-
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -160,27 +151,18 @@ class Tariff(models.Model):
     def __str__(self):
         return self.name
 
-    def get_average_daily_storage_rate(self):
-        """Retorna el promedio de las tarifas diarias de almacenamiento."""
-        rates = [self.refrigerated_storage,
-                 self.frozen_storage, self.dry_storage]
-        valid_rates = [r for r in rates if r > 0]
-        if valid_rates:
-            return sum(valid_rates) / len(valid_rates)
-        return Decimal('0.00')
-
 
 class Invoice(models.Model):
     """
     Modelo para almacenar comprobantes de facturación generados.
-    El número de comprobante es secuencial: RBCOLD0000001, RBCOLD0000002, etc.
+    El número de comprobante es secuencial por owner (prefijo en Workspace.invoice_prefix).
     """
     # Número de comprobante (secuencial)
     number = models.CharField(
         max_length=20, 
         unique=True,
         verbose_name='Número de comprobante',
-        help_text='Número secuencial del comprobante (ej: RBCOLD0000001)')
+        help_text='Número secuencial del comprobante (ej: RBCOLD0000001 por owner)')
     
     # Relación con cliente
     client = models.ForeignKey(
@@ -275,21 +257,32 @@ class Invoice(models.Model):
         return f"{self.number} - {self.client.name}"
     
     @classmethod
-    def get_next_number(cls):
+    def get_next_number(cls, workspace=None):
         """
-        Genera el siguiente número de comprobante secuencial.
-        Formato: RBCOLD0000001
+        Genera el siguiente número de comprobante secuencial para el owner.
+        Usa Workspace.invoice_prefix; si está vacío, usa el slug en mayúsculas o 'INV'.
         """
-        prefix = 'RBCOLD'
-        last_invoice = cls.objects.filter(
-            number__startswith=prefix
-        ).order_by('-number').first()
-        
+        prefix = 'INV'
+        if workspace is not None:
+            raw = (getattr(workspace, 'invoice_prefix', None) or '').strip()
+            if raw:
+                prefix = raw.upper()
+            elif getattr(workspace, 'slug', None):
+                prefix = str(workspace.slug).upper()
+
+        qs = cls.objects.filter(number__startswith=prefix)
+        if workspace is not None:
+            qs = qs.filter(client__workspace=workspace)
+
+        last_invoice = qs.order_by('-number').first()
+
         if last_invoice:
-            # Extraer el número del último comprobante
-            last_num = int(last_invoice.number.replace(prefix, ''))
-            next_num = last_num + 1
+            suffix = last_invoice.number[len(prefix):]
+            try:
+                next_num = int(suffix) + 1
+            except ValueError:
+                next_num = 1
         else:
             next_num = 1
-        
+
         return f"{prefix}{next_num:07d}"
