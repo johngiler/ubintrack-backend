@@ -10,13 +10,23 @@ class TaskLogInline(admin.TabularInline):
                        "created_by", "updated_by")
     fields = ("message", "created_at", "created_by")
 
+    def has_add_permission(self, request, obj=None):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
 
 @admin.register(models.Task)
 class TaskAdmin(admin.ModelAdmin):
-    inlines = [TaskLogInline,]
+    inlines = [TaskLogInline]
 
     list_display = (
         "code",
+        "workspace",
         "task_type",
         "status",
         "priority",
@@ -24,25 +34,24 @@ class TaskAdmin(admin.ModelAdmin):
         "started_at",
         "completed_at",
         "created_at",
-        "updated_at",
     )
 
-    list_filter = ("task_type", "status", "priority")
+    list_filter = ("workspace", "task_type", "status", "priority")
     search_fields = ("code", "assigned_to__username",
                      "entry__code", "exit__code")
     filter_horizontal = ("assigned_to",)
-    autocomplete_fields = ("entry", "exit")
+    autocomplete_fields = ("workspace", "entry", "exit")
     readonly_fields = ("code", "created_at", "updated_at",
                        "created_by", "updated_by")
 
     def get_assigned_users(self, obj):
-        """Mostrar usuarios asignados en el list_display"""
         return ", ".join([user.username for user in obj.assigned_to.all()])
+
     get_assigned_users.short_description = 'Asignado a'
 
     fieldsets = (
         ("Información básica", {
-            "fields": ("code", "task_type", "status", "priority")
+            "fields": ("code", "workspace", "task_type", "status", "priority")
         }),
         ("Asignación", {
             "fields": ("assigned_to", "entry", "exit")
@@ -63,18 +72,31 @@ class TaskAdmin(admin.ModelAdmin):
         }),
     )
 
-    def get_fieldsets(self, request, obj=None):
-        fieldsets = super().get_fieldsets(request, obj)
-        new_fieldsets = []
-        for title, options in fieldsets:
-            new_title = title.upper() if title else title
-            new_fieldsets.append((new_title, options))
-        return new_fieldsets
-
     def get_readonly_fields(self, request, obj=None):
         if obj:
-            return self.readonly_fields + ("task_type",)
+            return self.readonly_fields + ("task_type", "workspace")
         return self.readonly_fields
+
+
+@admin.register(models.TaskLog)
+class TaskLogAdmin(admin.ModelAdmin):
+    list_display = ('task', 'message', 'created_at', 'created_by')
+    list_filter = ('task__workspace', 'created_at')
+    search_fields = ('task__code', 'message')
+    readonly_fields = (
+        'task', 'message', 'created_at', 'updated_at',
+        'created_by', 'updated_by', 'is_active',
+    )
+    autocomplete_fields = ('task',)
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
 
 
 @admin.register(models.UserTaskTracking)
@@ -87,12 +109,11 @@ class UserTaskTrackingAdmin(admin.ModelAdmin):
         "duration",
         "time_since_last_task",
         "created_at",
-        "updated_at",
     )
 
-    list_filter = ("user", "timer_start", "timer_stop")
+    list_filter = ("user__workspace", "timer_start", "timer_stop")
     search_fields = ("user__username", "task__code")
-    autocomplete_fields = ("user",)
+    autocomplete_fields = ("user", "task")
     readonly_fields = ("created_at", "updated_at", "created_by", "updated_by")
 
     fieldsets = (
@@ -115,11 +136,3 @@ class UserTaskTrackingAdmin(admin.ModelAdmin):
             )
         }),
     )
-
-    def get_fieldsets(self, request, obj=None):
-        fieldsets = super().get_fieldsets(request, obj)
-        new_fieldsets = []
-        for title, options in fieldsets:
-            new_title = title.upper() if title else title
-            new_fieldsets.append((new_title, options))
-        return new_fieldsets

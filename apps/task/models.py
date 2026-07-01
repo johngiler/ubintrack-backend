@@ -4,7 +4,9 @@ from django_currentuser.db.models import CurrentUserField
 
 from apps.core.models import CustomUser
 from apps.order.models import Entry, Exit
-from apps.core.choices import TaskStatus, TaskType, TaskPriority
+from apps.core.choices import TaskStatus, TaskType, TaskPriority, UserType
+
+_STAFF_USER_FILTER = ~Q(user_type=UserType.CLIENT)
 
 
 class BaseModel(models.Model):
@@ -27,8 +29,18 @@ class BaseModel(models.Model):
 
 
 class Task(BaseModel):
-    code = models.CharField(max_length=15, unique=True,
-                            editable=False, verbose_name='código de tarea')
+    workspace = models.ForeignKey(
+        'workspaces.Workspace',
+        on_delete=models.CASCADE,
+        related_name='tasks',
+        verbose_name='workspace',
+    )
+    code = models.CharField(
+        max_length=100,
+        unique=True,
+        editable=False,
+        verbose_name='código de tarea',
+    )
     task_type = models.CharField(
         max_length=30, choices=TaskType.choices, verbose_name='tipo de tarea')
     status = models.CharField(
@@ -44,7 +56,7 @@ class Task(BaseModel):
         CustomUser,
         blank=True,
         related_name="tasks",
-        limit_choices_to=~Q(user_type='cliente'),
+        limit_choices_to=_STAFF_USER_FILTER,
         verbose_name='asignado a'
     )
 
@@ -74,13 +86,29 @@ class Task(BaseModel):
 
     def save(self, *args, **kwargs):
         if not self.code:
-            last_task = Task.objects.order_by('id').last()
-            if last_task and last_task.code:
-                last_number = int(last_task.code.split('-')[-1])
-                new_number = last_number + 1
+            if self.workspace_id:
+                from apps.workspaces.models import Workspace
+                slug = Workspace.objects.filter(pk=self.workspace_id).values_list(
+                    'slug', flat=True,
+                ).first() or 'TASK'
+                prefix = f'{slug.upper().replace("-", "")}-TASK'
+                last_task = (
+                    Task.objects.filter(workspace_id=self.workspace_id)
+                    .order_by('id')
+                    .last()
+                )
+            else:
+                prefix = 'TASK'
+                last_task = Task.objects.filter(workspace__isnull=True).order_by('id').last()
+
+            if last_task and last_task.code and '-' in last_task.code:
+                try:
+                    new_number = int(last_task.code.split('-')[-1]) + 1
+                except ValueError:
+                    new_number = 1
             else:
                 new_number = 1
-            self.code = f"TASK-{new_number:010d}"
+            self.code = f'{prefix}-{new_number:010d}'
         super().save(*args, **kwargs)
 
     def __str__(self):
@@ -105,7 +133,7 @@ class UserTaskTracking(BaseModel):
         CustomUser,
         on_delete=models.CASCADE,
         related_name="task_trackings",
-        limit_choices_to=~Q(user_type='cliente'),
+        limit_choices_to=_STAFF_USER_FILTER,
         verbose_name='usuario'
     )
 
