@@ -8,7 +8,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.core.utils.user_roles import can_manage_as_administrator
-from apps.workspaces.serializers import (
+from apps.workspaces.api.serializers import (
     WorkspaceMeReadSerializer,
     WorkspaceMeUpdateSerializer,
     WorkspacePublicSerializer,

@@ -3,19 +3,6 @@ from rest_framework import serializers
 from apps.workspaces.models import Workspace
 
 
-class WorkspaceTransactionalSmtpTestSerializer(serializers.Serializer):
-    """Reservado para prueba SMTP futura."""
-
-    transactional_email_host = serializers.CharField(max_length=255)
-    transactional_email_port = serializers.IntegerField(min_value=1, max_value=65535, default=587)
-    transactional_email_use_tls = serializers.BooleanField(default=True)
-    transactional_email_use_ssl = serializers.BooleanField(default=False)
-    transactional_email_username = serializers.CharField(max_length=255, allow_blank=True)
-    transactional_email_password = serializers.CharField(
-        max_length=512, allow_blank=True, required=False, default=""
-    )
-
-
 class WorkspacePublicSerializer(serializers.ModelSerializer):
     """Branding y metadatos públicos del owner resuelto por la petición."""
 

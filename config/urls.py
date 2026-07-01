@@ -12,7 +12,7 @@ from apps.inventory.api import views as inventory_views
 from apps.order.api import views as order_views
 from apps.storage.api import views as storage_views
 from apps.task.api import views as task_views
-from apps.workspaces.views.workspace_views import WorkspaceCurrentView, WorkspaceMeView
+from apps.workspaces.api.views import WorkspaceCurrentView, WorkspaceMeView
 
 admin.site.site_header = _("Administración")
 admin.site.site_title = _("Admin")
