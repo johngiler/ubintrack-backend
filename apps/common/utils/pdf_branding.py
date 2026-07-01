@@ -1,4 +1,4 @@
-"""Branding de PDFs por workspace (logo, nombre, pie)."""
+"""Branding por workspace (PDF, etiquetas, etc.)."""
 from io import BytesIO
 
 
@@ -11,6 +11,52 @@ def workspace_display_name(workspace):
         return workspace.legal_name.strip()
     return workspace.name
 
+
+def workspace_from_client(client):
+    if client is None:
+        return None
+    return getattr(client, "workspace", None)
+
+
+def open_workspace_logo_pil(workspace, max_width, max_height):
+    """Abre logo del workspace como PIL.Image redimensionado, o None."""
+    from PIL import Image as PILImage
+
+    if workspace is None:
+        return None
+    for attr in ("logo", "logo_mark"):
+        field = getattr(workspace, attr, None)
+        if not field:
+            continue
+        try:
+            with field.open("rb") as fh:
+                img = PILImage.open(fh)
+                img.load()
+            img = img.convert("RGBA")
+            img.thumbnail((max_width, max_height), PILImage.Resampling.LANCZOS)
+            return img
+        except Exception:
+            continue
+    return None
+
+
+def draw_workspace_brand_header_pil(tag, draw, workspace, tag_width, y, title_font, padding):
+    """Pega logo centrado o dibuja nombre del owner; devuelve Y tras el encabezado."""
+    logo = open_workspace_logo_pil(workspace, tag_width - padding * 2, 140)
+    if logo is not None:
+        x = (tag_width - logo.width) // 2
+        tag.paste(logo, (x, y), logo if logo.mode == "RGBA" else None)
+        return y + logo.height + 40
+
+    company_name = workspace_display_name(workspace)
+    try:
+        title_bbox = draw.textbbox((0, 0), company_name, font=title_font)
+        title_width = title_bbox[2] - title_bbox[0]
+    except AttributeError:
+        title_width = draw.textlength(company_name, font=title_font)
+
+    draw.text(((tag_width - title_width) / 2, y), company_name, font=title_font, fill="black")
+    return y + 180
 
 def workspace_logo_flowable(workspace, fallback_style, size=1.5):
     """Logo del workspace para ReportLab o Paragraph con nombre."""

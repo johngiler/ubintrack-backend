@@ -11,6 +11,11 @@ from . import models
 from apps.order.models import ExitProduct
 from apps.core.choices import OrderStatus, BinStatus
 from apps.common.utils.media_layout import build_wms_bin_tag_relative, ensure_media_parent_dir
+from apps.common.utils.pdf_branding import (
+    draw_workspace_brand_header_pil,
+    workspace_display_name,
+    workspace_from_client,
+)
 
 
 def generate_bin_tag(bin_instance):
@@ -56,23 +61,13 @@ def generate_bin_tag(bin_instance):
         position = bin_instance.position.code
 
     bin_code = bin_instance.code
+    workspace = workspace_from_client(bin_instance.client)
 
-    # Dibujar el título de la empresa centrado en la parte superior
-    company_name = "RB COLD CHAIN"  # Con espacios
-    # Usar textbbox para medir el texto (más preciso)
-    try:
-        # Para versiones más recientes de PIL
-        title_bbox = draw.textbbox((0, 0), company_name, font=title_font)
-        title_width = title_bbox[2] - title_bbox[0]
-    except AttributeError:
-        # Para versiones antiguas de PIL
-        title_width = draw.textlength(company_name, font=title_font)
-
-    draw.text(((tag_width - title_width) / 2, padding),
-              company_name, font=title_font, fill="black")
+    y_pos = draw_workspace_brand_header_pil(
+        tag, draw, workspace, tag_width, padding, title_font, padding,
+    )
 
     # Diseño vertical con etiquetas y valores
-    y_pos = padding + 180  # Espacio después del título
     col1 = padding
     label_width = 250  # Espacio para separar keys y values
     value_max_width = tag_width - col1 - label_width - \
@@ -249,6 +244,14 @@ def generate_bin_tag_zpl(bin_instance):
     Retorna el string con el código ZPL.
     """
     # Obtener información principal
+    def truncate_text_zpl(text, max_length=25):
+        if len(text) > max_length:
+            return text[:max_length - 3] + "..."
+        return text
+
+    def zpl_safe(text):
+        return str(text).replace("^", " ").replace("~", " ")
+
     client = bin_instance.client.name if bin_instance.client else "-"
     position = "-"
 
@@ -256,15 +259,11 @@ def generate_bin_tag_zpl(bin_instance):
         position = bin_instance.position.code
 
     bin_code = bin_instance.code
-
-    # Función para truncar textos largos
-    def truncate_text_zpl(text, max_length=25):
-        if len(text) > max_length:
-            return text[:max_length-3] + "..."
-        return text
-
-    # Truncar textos largos para evitar descuadres
-    client = truncate_text_zpl(client)
+    workspace = workspace_from_client(bin_instance.client)
+    company_name = truncate_text_zpl(zpl_safe(workspace_display_name(workspace)))
+    client = truncate_text_zpl(zpl_safe(client))
+    position = zpl_safe(position)
+    bin_code = zpl_safe(bin_code)
 
     # Reducir el espaciado vertical entre filas
     row_spacing = 70  # Reducido de 100 a 70
@@ -284,7 +283,7 @@ def generate_bin_tag_zpl(bin_instance):
 ^CF0,45   ; Fuente por defecto y tamaño
 
 ; Título alineado a la izquierda con más margen inferior
-^FO50,{title_y}^A0N,55,55^FD RB COLD CHAIN^FS
+^FO50,{title_y}^A0N,55,55^FD{company_name}^FS
 
 ; Cliente
 ^FO50,{client_y}^A0N,35,35^FDCLIENTE:^FS

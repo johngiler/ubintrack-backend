@@ -12,7 +12,6 @@ load_dotenv(BASE_DIR / ".env")
 
 SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "django-insecure-dev-only-ubintrack")
 DEBUG = os.environ.get("DJANGO_DEBUG", "true").lower() in ("1", "true", "yes")
-DJANGO_ENV = os.environ.get("DJANGO_ENV", "development").strip().lower()
 
 ALLOWED_HOSTS = [
     h.strip()
@@ -121,11 +120,12 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 AUTH_USER_MODEL = "core.CustomUser"
 
-# Multi-tenant SaaS
-DEFAULT_WORKSPACE_SLUG = os.environ.get("DEFAULT_WORKSPACE_SLUG", "rbcold").strip().lower() or "rbcold"
+# Multi-tenant SaaS (resolución en apps/workspaces/utils/tenant.py)
+DEFAULT_WORKSPACE_SLUG = os.environ.get("DEFAULT_WORKSPACE_SLUG", "").strip().lower()
 TENANT_BASE_DOMAIN = os.environ.get("TENANT_BASE_DOMAIN", "").strip().lower()
 FRONTEND_BASE_URL = os.environ.get("FRONTEND_BASE_URL", "").strip().rstrip("/")
-FRONTEND_DEV_PORT = os.environ.get("FRONTEND_DEV_PORT", "3000")
+FRONTEND_DEV_PORT = os.environ.get("FRONTEND_DEV_PORT", "3000").strip() or "3000"
+FRONTEND_URL_SCHEME = os.environ.get("FRONTEND_URL_SCHEME", "https").strip().lower()
 
 if DEBUG:
     CORS_ALLOW_ALL_ORIGINS = True
@@ -144,7 +144,7 @@ else:
     if _csrf_origins.strip():
         CSRF_TRUSTED_ORIGINS = [o.strip() for o in _csrf_origins.split(",") if o.strip()]
 
-CORS_ALLOW_HEADERS = (*default_headers, "x-workspace-slug", "x-tenant-slug")
+CORS_ALLOW_HEADERS = (*default_headers, "x-workspace-slug")
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (

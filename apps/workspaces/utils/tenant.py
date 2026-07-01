@@ -7,7 +7,6 @@ Resolución de owner (Workspace) por petición y reglas de aislamiento SaaS WMS.
 
 from __future__ import annotations
 
-import os
 from urllib.parse import urlparse
 
 from django.conf import settings
@@ -66,7 +65,6 @@ def resolve_request_workspace(request) -> tuple[Workspace | None, str | None]:
     """
     header_slug = (
         request.META.get("HTTP_X_WORKSPACE_SLUG")
-        or request.META.get("HTTP_X_TENANT_SLUG")
         or ""
     ).strip().lower()
     if header_slug and header_slug not in RESERVED_SUBDOMAINS:
@@ -102,7 +100,7 @@ def default_workspace_slug() -> str:
     raw = getattr(settings, "DEFAULT_WORKSPACE_SLUG", None)
     if isinstance(raw, str) and raw.strip():
         return raw.strip().lower()
-    return "rbcold"
+    return ""
 
 
 def get_default_workspace_safely() -> Workspace | None:
@@ -119,13 +117,17 @@ def spa_public_base_url(ws: Workspace | None) -> str:
         slug = str(ws.slug).strip().lower()
     else:
         slug = default_workspace_slug()
+        if not slug:
+            fallback = get_default_workspace_safely()
+            if fallback:
+                slug = fallback.slug
 
     apex = _tenant_apex_for_resolution()
     if apex:
         if apex == "localhost":
-            port = (os.environ.get("FRONTEND_DEV_PORT") or "3000").strip() or "3000"
+            port = getattr(settings, "FRONTEND_DEV_PORT", "3000")
             return f"http://{slug}.localhost:{port}".rstrip("/")
-        scheme = (os.environ.get("FRONTEND_URL_SCHEME") or "https").strip().lower()
+        scheme = getattr(settings, "FRONTEND_URL_SCHEME", "https")
         if scheme not in ("http", "https"):
             scheme = "https"
         return f"{scheme}://{slug}.{apex}".rstrip("/")
@@ -133,7 +135,8 @@ def spa_public_base_url(ws: Workspace | None) -> str:
     fb = (getattr(settings, "FRONTEND_BASE_URL", None) or "").strip().rstrip("/")
     if fb:
         return fb
-    return f"http://{slug}.localhost:3000".rstrip("/")
+    port = getattr(settings, "FRONTEND_DEV_PORT", "3000")
+    return f"http://{slug}.localhost:{port}".rstrip("/")
 
 
 def get_workspace_for_request(request) -> Workspace | None:
