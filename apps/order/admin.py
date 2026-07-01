@@ -35,10 +35,19 @@ class EntryDetailInline(admin.StackedInline):
 @admin.register(models.Entry)
 class EntryAdmin(ClientFilterMixin, admin.ModelAdmin):
     inlines = [EntryProductInline, EntryDetailInline]
-    list_display = ('code', 'client', 'storage', 'status',
+    list_display = ('code', 'client', 'workspace', 'storage', 'status',
                     'entry_date', 'products_with_quantities')
+    list_filter = ('client__workspace', 'status')
     search_fields = ('code', 'client__name', 'storage__name')
     autocomplete_fields = ('client',)
+
+    def workspace(self, obj):
+        if obj.client and obj.client.workspace:
+            return obj.client.workspace
+        return '-'
+
+    workspace.short_description = 'owner'
+    workspace.admin_order_field = 'client__workspace'
 
     def products_with_quantities(self, obj):
         if hasattr(obj, 'entry_products') and obj.entry_products.exists():
@@ -104,10 +113,19 @@ class ExitDetailInline(admin.StackedInline):
 @admin.register(models.Exit)
 class ExitAdmin(ClientFilterMixin, admin.ModelAdmin):
     inlines = [ExitProductGroupInline, ExitDetailInline]
-    list_display = ('code', 'client', 'branch', 'status',
+    list_display = ('code', 'client', 'workspace', 'branch', 'status',
                     'exit_date', 'products_with_quantities')
+    list_filter = ('client__workspace', 'status')
     search_fields = ('code', 'client__name')
     autocomplete_fields = ('client',)
+
+    def workspace(self, obj):
+        if obj.client and obj.client.workspace:
+            return obj.client.workspace
+        return '-'
+
+    workspace.short_description = 'owner'
+    workspace.admin_order_field = 'client__workspace'
 
     def products_with_quantities(self, obj):
         if hasattr(obj, 'exit_product_groups') and obj.exit_product_groups.exists():
@@ -139,3 +157,30 @@ class ExitProductGroupAdmin(admin.ModelAdmin):
         if obj:
             return ('exit', 'product')
         return []
+
+
+@admin.register(models.ExitMovement)
+class ExitMovementAdmin(admin.ModelAdmin):
+    list_display = (
+        'created_at', 'exit', 'movement_type', 'old_status', 'new_status',
+        'bin_code', 'product_name', 'quantity',
+    )
+    list_filter = ('movement_type', 'exit__client__workspace')
+    search_fields = ('exit__code', 'bin_code', 'product_name', 'notes')
+    readonly_fields = (
+        'exit', 'movement_type', 'old_status', 'new_status',
+        'product', 'product_sku', 'product_name', 'bin', 'bin_code',
+        'old_bin_code', 'new_bin_code', 'quantity', 'old_quantity',
+        'new_quantity', 'is_picking', 'notes', 'metadata',
+        'created_at', 'updated_at',
+    )
+    autocomplete_fields = ('exit',)
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False

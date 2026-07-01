@@ -656,35 +656,35 @@ def replace_exit_product_bin(exit_product_id, new_bin_code, user=None):
 
         # 2. Buscar el nuevo bin por código
         try:
-            new_bin_entry = Bin.objects.select_related(
+            new_bin = Bin.objects.select_related(
                 'client', 'position').get(code=new_bin_code)
         except Bin.DoesNotExist:
             raise ValidationError(
                 f'Bin con código "{new_bin_code}" no encontrado.')
 
         # 2.1 Validar que no sea el mismo bin
-        if new_bin_entry.id == original_bin_product.bin.id:
+        if new_bin.id == original_bin_product.bin.id:
             raise ValidationError(
                 f'El bin {new_bin_code} es el mismo bin actual. Seleccione un bin diferente.')
 
         # 3. Validar que el bin esté activo y almacenado
-        if not new_bin_entry.is_active:
+        if not new_bin.is_active:
             raise ValidationError(f'El bin {new_bin_code} no está activo.')
 
-        if new_bin_entry.status != choices.BinStatus.ALMACENADO:
+        if new_bin.status != choices.BinStatus.ALMACENADO:
             status_display = dict(choices.BinStatus.choices).get(
-                new_bin_entry.status, new_bin_entry.status)
+                new_bin.status, new_bin.status)
             raise ValidationError(
                 f'El bin {new_bin_code} no está almacenado (estado actual: {status_display}).')
 
         # 4. Validar que sea del mismo cliente
-        if new_bin_entry.client_id != expected_client.id:
+        if new_bin.client_id != expected_client.id:
             raise ValidationError(
                 f'El bin {new_bin_code} pertenece a otro cliente.')
 
         # 5. Buscar el BinProduct con el mismo producto en el nuevo bin
         new_bin_product = BinProduct.objects.filter(
-            bin=new_bin_entry,
+            bin=new_bin,
             entry_product__product=expected_product
         ).select_related('entry_product', 'entry_product__product').first()
 
@@ -763,7 +763,7 @@ def replace_exit_product_bin(exit_product_id, new_bin_code, user=None):
                 'merged': True,
                 'original_bin_code': original_bin_code,
                 'new_bin_code': new_bin_code,
-                'new_bin_position': new_bin_entry.position.code if new_bin_entry.position else None,
+                'new_bin_position': new_bin.position.code if new_bin.position else None,
                 'new_bin_quantity': new_bin_product.quantity,
                 'new_total_assigned': new_total_quantity,
                 'quantity_added': quantity_needed,
@@ -805,7 +805,7 @@ def replace_exit_product_bin(exit_product_id, new_bin_code, user=None):
                 'merged': False,
                 'original_bin_code': original_bin_code,
                 'new_bin_code': new_bin_code,
-                'new_bin_position': new_bin_entry.position.code if new_bin_entry.position else None,
+                'new_bin_position': new_bin.position.code if new_bin.position else None,
                 'new_bin_quantity': new_bin_product.quantity,
                 'quantity_assigned': quantity_needed,
                 'is_picking': exit_product.is_picking,
@@ -1011,12 +1011,12 @@ def reverse_exit_product_atomic(exit_product_id, user=None):
 
 
 @transaction.atomic
-def update_bin_status_atomic(bin_entry_id, new_status, user=None, was_qr_validated=False):
+def update_bin_status_atomic(bin_id, new_status, user=None, was_qr_validated=False):
     """
     Actualiza el estado de un bin de forma atómica.
 
     Args:
-        bin_entry_id: ID del Bin
+        bin_id: ID del Bin
         new_status: Nuevo estado
         user: Usuario que realiza la operación
         was_qr_validated: Si fue validado con QR
@@ -1029,7 +1029,7 @@ def update_bin_status_atomic(bin_entry_id, new_status, user=None, was_qr_validat
     """
     try:
         bin = Bin.objects.select_related(
-            'position').get(id=bin_entry_id)
+            'position').get(id=bin_id)
 
         old_status = bin.status
 
@@ -1065,7 +1065,7 @@ def update_bin_status_atomic(bin_entry_id, new_status, user=None, was_qr_validat
         return bin
 
     except Bin.DoesNotExist:
-        raise ValidationError(f'Bin con ID {bin_entry_id} no encontrado')
+        raise ValidationError(f'Bin con ID {bin_id} no encontrado')
     except Exception as e:
         raise TransactionError(
             f'Error al actualizar estado del bin: {str(e)}') from e
@@ -1097,12 +1097,6 @@ def generate_exit_pdf(exit_instance):
 
     # Verificar que la instancia tiene grupos de productos
     groups_count = exit_instance.exit_product_groups.count()
-    print(
-        f"DEBUG: La orden de salida {exit_instance.code} tiene {groups_count} grupos de productos")
-
-    if groups_count == 0:
-        print(
-            f"ADVERTENCIA: La orden de salida {exit_instance.code} no tiene grupos de productos. Puede que el PDF se genere vacío.")
 
     relative_path = build_wms_exit_pdf_relative(exit_instance)
     filepath = ensure_media_parent_dir(relative_path)
@@ -1183,8 +1177,6 @@ def generate_exit_pdf(exit_instance):
     unique_bins = set()
     total_items = 0
 
-    print(
-        f"DEBUG: Iniciando conteo para la orden de salida {exit_instance.code}")
 
     # Añadir productos de la orden de salida
     for group in exit_instance.exit_product_groups.all():
@@ -1204,7 +1196,6 @@ def generate_exit_pdf(exit_instance):
 
         # Sumar todas las cantidades independientemente del tipo de unidad
         total_items += quantity
-        print(f"DEBUG: Producto {product.name} - {quantity} {product.uom}")
 
         # Obtener los exit_products asociados a este grupo para contar bins únicos
         for exit_product in group.exit_products.all():
@@ -1212,8 +1203,6 @@ def generate_exit_pdf(exit_instance):
                 bin = exit_product.bin_product.bin
                 bin_id = bin.id
                 unique_bins.add(bin_id)
-                print(
-                    f"DEBUG: Detectado bin_id={bin_id} para producto {product.name}")
 
     # El total de bins es el número de bins únicos (bins completos)
     total_bins_completos = len(unique_bins)
@@ -1229,10 +1218,6 @@ def generate_exit_pdf(exit_instance):
     # Total de pallets = bins completos + pallets de picking
     total_bins = total_bins_completos + picking_pallets
 
-    print(f"DEBUG: Total de bins completos: {total_bins_completos}")
-    print(f"DEBUG: Pallets de picking: {picking_pallets}")
-    print(f"DEBUG: Total de pallets/bins: {total_bins}")
-    print(f"DEBUG: Total de items: {total_items}")
 
     # Si hay productos
     if len(data) > 1:
@@ -1257,8 +1242,6 @@ def generate_exit_pdf(exit_instance):
         ]))
         elements.append(table)
 
-        print(
-            f"DEBUG: TOTALES FINALES: PALLETS/BINS: {total_bins}, ITEMS: {total_items}")
     else:
         elements.append(Paragraph(
             "<i>No hay productos registrados en esta orden de salida.</i>", styles["LeftHeading"]))
@@ -1371,8 +1354,6 @@ def update_exit_pdf(exit_instance):
             # Si tiene productos o es el último intento, usar este PDF
             break
 
-        print(
-            f"Intento {attempt+1}/{max_retries}: La orden no tiene productos aún. Esperando {retry_delay} segundos...")
         time.sleep(retry_delay)
         retry_delay *= 2  # Duplicar el tiempo de espera en cada intento
 
@@ -1387,8 +1368,8 @@ def update_exit_pdf(exit_instance):
                     ALTER TABLE order_exitdetail 
                     ADD COLUMN IF NOT EXISTS pdf_document VARCHAR(255) NULL;
                 """)
-            except Exception as e:
-                print(f"Error al verificar campo pdf_document: {e}")
+            except Exception:
+                pass
 
         exit_instance.exit_detail.pdf_document = pdf_path
         exit_instance.exit_detail.save(update_fields=['pdf_document'])
@@ -1422,12 +1403,6 @@ def generate_entry_pdf(entry_instance):
 
     # Verificar que la instancia tiene productos
     products_count = entry_instance.entry_products.count()
-    print(
-        f"DEBUG: La orden de entrada {entry_instance.code} tiene {products_count} productos")
-
-    if products_count == 0:
-        print(
-            f"ADVERTENCIA: La orden de entrada {entry_instance.code} no tiene productos. Puede que el PDF se genere vacío.")
 
     relative_path = build_wms_entry_pdf_relative(entry_instance)
     filepath = ensure_media_parent_dir(relative_path)
@@ -1523,9 +1498,6 @@ def generate_entry_pdf(entry_instance):
 
     total_bins = len(unique_bins)
 
-    print(
-        f"DEBUG: Iniciando conteo para la orden de entrada {entry_instance.code}")
-    print(f"DEBUG: Total de bins asociados: {total_bins}")
 
     # Añadir productos de la orden de entrada
     for entry_product in entry_instance.entry_products.all():
@@ -1554,10 +1526,7 @@ def generate_entry_pdf(entry_instance):
 
         # Sumar todas las cantidades reales
         total_items += real_quantity
-        print(
-            f"DEBUG: Producto {product.name} - {real_quantity} {product.uom}")
 
-    print(f"DEBUG: Total de items: {total_items}")
 
     # Si hay productos
     if len(data) > 1:
@@ -1582,8 +1551,6 @@ def generate_entry_pdf(entry_instance):
         ]))
         elements.append(table)
 
-        print(
-            f"DEBUG: TOTALES FINALES: CANTIDAD: {total_items}")
     else:
         elements.append(Paragraph(
             "<i>No hay productos registrados en esta orden de entrada.</i>", styles["LeftHeading"]))
@@ -1708,8 +1675,6 @@ def update_entry_pdf(entry_instance):
             # Si tiene productos o es el último intento, usar este PDF
             break
 
-        print(
-            f"Intento {attempt+1}/{max_retries}: La orden no tiene productos aún. Esperando {retry_delay} segundos...")
         time.sleep(retry_delay)
         retry_delay *= 2  # Duplicar el tiempo de espera en cada intento
 
@@ -1724,8 +1689,8 @@ def update_entry_pdf(entry_instance):
                     ALTER TABLE order_entrydetail 
                     ADD COLUMN IF NOT EXISTS pdf_document VARCHAR(255) NULL;
                 """)
-            except Exception as e:
-                print(f"Error al verificar campo pdf_document: {e}")
+            except Exception:
+                pass
 
         entry_instance.entry_detail.pdf_document = pdf_path
         entry_instance.entry_detail.save(update_fields=['pdf_document'])

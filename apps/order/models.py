@@ -248,7 +248,6 @@ class EntryProduct(BaseModel):
         if entry.status != new_status:
             entry.status = new_status
             entry.save(update_fields=['status'])
-            print(f"DEBUG: Entrada {entry.code} actualizada a {new_status}")
 
 
 class EntryDetail(BaseModel):
@@ -271,8 +270,8 @@ class EntryDetail(BaseModel):
         null=True, blank=True, verbose_name='descripción')
 
     image = models.ImageField(
-        upload_to=wms_entry_detail_image_upload, null=True, blank=True, verbose_name='imagen'
-    )
+        upload_to=wms_entry_detail_image_upload, null=True, blank=True,
+        verbose_name='imagen')
 
     pdf_document = models.FileField(
         upload_to=wms_entry_pdf_upload,
@@ -286,6 +285,14 @@ class EntryDetail(BaseModel):
         verbose_name_plural = 'detalle de la orden de entrada'
 
     def save(self, *args, **kwargs):
+        if self.pk:
+            old_image = EntryDetail.objects.filter(pk=self.pk).first().image
+            if self.image and old_image != self.image:
+                ext = os.path.splitext(self.image.name)[1]
+                self.image.name = f'{self.entry.code}{ext}'
+        elif self.image:
+            ext = os.path.splitext(self.image.name)[1]
+            self.image.name = f'{self.entry.code}{ext}'
         super().save(*args, **kwargs)
 
     def __str__(self):
@@ -444,12 +451,6 @@ class Exit(BaseModel):
                         update_fields=['status', 'dispatched_date', 'updated_at'])
                     bins_updated += 1
 
-            print(
-                f"DEBUG: Orden {self.code} completada. {bins_updated} bins actualizados a DESPACHADO, {len(bin_ids_excluded)} bins con cantidad > 0 excluidos")
-        else:
-            print(
-                f"DEBUG: Orden {self.code} completada pero no todos los exit_products están procesados")
-
     def __str__(self):
         return self.code
 
@@ -519,12 +520,9 @@ class ExitProductGroup(BaseModel):
         from apps.inventory.models import BinProduct
         from django.db.models import Sum
 
-        print(
-            f"DEBUG: Generando exit_products para grupo {self.id} - Producto: {self.product.name} - Cantidad: {self.quantity} - Criterios: {self.bin_or_batch or 'No especificado (FEFO)'}")
 
         # Si ya tiene exit_products, limpiamos para regenerar
         if self.exit_products.exists():
-            print(f"DEBUG: El grupo ya tiene exit_products, limpiando...")
             self.exit_products.all().delete()
 
         # Obtener IDs de bins que ya están asociados como bins COMPLETOS a otras salidas activas
@@ -581,8 +579,6 @@ class ExitProductGroup(BaseModel):
             # Dividir por comas y limpiar espacios
             bin_or_batch_list = [item.strip()
                                  for item in self.bin_or_batch.split(',') if item.strip()]
-            print(
-                f"DEBUG: Procesando múltiples criterios: {bin_or_batch_list}")
 
             # Separar bins y lotes
             bin_codes = [
@@ -590,8 +586,6 @@ class ExitProductGroup(BaseModel):
             batches = [
                 item for item in bin_or_batch_list if not item.startswith("BIN-")]
 
-            print(f"DEBUG: Bin codes: {bin_codes}")
-            print(f"DEBUG: Lotes: {batches}")
 
             # Crear lista ordenada de bins según prioridad especificada
             prioritized_bins = []
@@ -656,13 +650,10 @@ class ExitProductGroup(BaseModel):
                 max(0, bin_product.quantity -
                     reservations_dict.get(bin_product.id, 0))
                 for bin_product in prioritized_bins)
-            print(
-                f"DEBUG: Cantidad disponible REAL en criterios priorizados: {prioritized_quantity}")
 
             if prioritized_quantity >= self.quantity:
                 # Suficiente en los criterios especificados
                 bins_with_product = prioritized_bins
-                print(f"DEBUG: Suficiente cantidad en criterios priorizados")
             else:
                 # Combinar bins priorizados + otros bins (FEFO)
                 # Excluir los bins ya utilizados (por bin_id, NO por BinProduct id)
@@ -701,8 +692,6 @@ class ExitProductGroup(BaseModel):
                 bins_with_product = prioritized_bins + list(other_bins)
                 other_quantity = other_bins.aggregate(
                     total=Sum('quantity'))['total'] or 0
-                print(
-                    f"DEBUG: Combinando criterios priorizados + FEFO. Priorizados: {prioritized_quantity}, Total disponible: {prioritized_quantity + other_quantity}")
         else:
             # Sin lote especificado
             # Si NO se especificó bin_code, priorizar bins en posiciones picking (nivel del suelo)
@@ -728,19 +717,13 @@ class ExitProductGroup(BaseModel):
                 bins_with_product = list(
                     picking_position_bins) + list(other_bins)
                 picking_count = picking_position_bins.count()
-                print(
-                    f"DEBUG: Sin lote especificado, priorizando posiciones picking. Bins picking: {picking_count}, Otros bins: {other_bins.count()}")
             else:
                 # Si se especificó bin_code, usar FEFO normal sin priorizar posiciones picking
                 bins_with_product = bins_query.order_by(
                     F('entry_product__expiration_date').asc(nulls_last=True),
                     'id'
                 )
-                print(
-                    f"DEBUG: Bin_code especificado, usando FEFO normal sin priorizar posiciones picking")
 
-        print(
-            f"DEBUG: Encontrados {len(bins_with_product) if isinstance(bins_with_product, list) else bins_with_product.count()} bins con el producto")
 
         # Verificar que hay suficiente inventario REAL (física - reservas existentes)
         if isinstance(bins_with_product, list):
@@ -751,9 +734,6 @@ class ExitProductGroup(BaseModel):
             # Debug: mostrar reservas por bin
             for bp in bins_with_product:
                 reserved = reservations_dict.get(bp.id, 0)
-                if reserved > 0:
-                    print(
-                        f"DEBUG: Bin {bp.bin.code} - Física: {bp.quantity}, Reservada: {reserved}, Disponible: {bp.quantity - reserved}")
         else:
             # Para querysets, calcular disponible real
             bins_list = list(bins_with_product)
@@ -762,12 +742,9 @@ class ExitProductGroup(BaseModel):
                 for bp in bins_list)
             bins_with_product = bins_list
 
-        print(
-            f"DEBUG: Inventario disponible REAL: {total_available}, Solicitado: {self.quantity}")
 
         if total_available < self.quantity:
             error_msg = f"Cantidad insuficiente. Solicitado: {self.quantity}, Disponible REAL: {total_available} (ya restando reservas existentes)"
-            print(f"ERROR: {error_msg}")
             raise ValidationError(error_msg)
 
         # Crear los ExitProducts
@@ -787,8 +764,6 @@ class ExitProductGroup(BaseModel):
 
             # Si no hay disponibilidad real en este bin, saltar al siguiente
             if available_in_bin <= 0:
-                print(
-                    f"DEBUG: Bin {bin_product.bin.code} sin disponibilidad real (Física: {bin_product.quantity}, Reservada: {reserved}, Ya asignado: {already_assigned})")
                 continue
 
             # Determinar cuánto extraer de este bin (de la disponibilidad real)
@@ -798,8 +773,6 @@ class ExitProductGroup(BaseModel):
             total_from_this_bin = already_assigned + quantity_to_extract
             is_picking = total_from_this_bin < bin_product.quantity
 
-            print(
-                f"DEBUG: Bin {bin_product.bin.code} - Lote: {bin_product.entry_product.batch or 'Sin lote'} - Física: {bin_product.quantity} - Reservada: {reserved} - Disponible real: {available_in_bin} - A extraer: {quantity_to_extract} - Is picking: {is_picking}")
 
             # Crear ExitProduct
             exit_product = ExitProduct.objects.create(
@@ -810,36 +783,22 @@ class ExitProductGroup(BaseModel):
             )
             exit_products_created += 1
 
-            print(
-                f"DEBUG: Creado exit_product {exit_product.id} con cantidad {quantity_to_extract}")
 
             # Actualizar tracking de asignación en esta corrida
             assigned_in_this_run[bin_product.id] = already_assigned + quantity_to_extract
 
             # Si la orden ya está en COMPLETADA, actualizamos inmediatamente la cantidad en el bin
             if self.exit.status == OrderStatus.COMPLETADA:
-                print(
-                    f"DEBUG: La orden está COMPLETADA, restando cantidad del bin inmediatamente")
                 bin_product.quantity -= quantity_to_extract
                 bin_product.save(update_fields=['quantity'])
 
             # Actualizar cantidad restante
             quantity_remaining -= quantity_to_extract
 
-        print(
-            f"DEBUG: Generados {exit_products_created} exit_products. Cantidad restante: {quantity_remaining}")
 
         # Verificar si se generaron todos los exit_products necesarios
-        if quantity_remaining > 0:
-            print(
-                f"ERROR: No se pudo asignar toda la cantidad. Faltan {quantity_remaining} unidades")
-
         # Verificar si el grupo tiene los exit_products esperados
         actual_count = self.exit_products.count()
-        if actual_count != exit_products_created:
-            print(
-                f"ERROR: Discrepancia en exit_products creados. Esperados: {exit_products_created}, Actuales: {actual_count}")
-
         return exit_products_created
 
     def update_quantity(self):
@@ -950,8 +909,8 @@ class ExitDetail(BaseModel):
         null=True, blank=True, verbose_name='descripción')
 
     image = models.ImageField(
-        upload_to=wms_exit_detail_image_upload, null=True, blank=True, verbose_name='imagen'
-    )
+        upload_to=wms_exit_detail_image_upload, null=True, blank=True,
+        verbose_name='imagen')
 
     pdf_document = models.FileField(
         upload_to=wms_exit_pdf_upload,
@@ -965,6 +924,14 @@ class ExitDetail(BaseModel):
         verbose_name_plural = 'detalle de la orden de salida'
 
     def save(self, *args, **kwargs):
+        if self.pk:
+            old_image = ExitDetail.objects.filter(pk=self.pk).first().image
+            if self.image and old_image != self.image:
+                ext = os.path.splitext(self.image.name)[1]
+                self.image.name = f'{self.exit.code}{ext}'
+        elif self.image:
+            ext = os.path.splitext(self.image.name)[1]
+            self.image.name = f'{self.exit.code}{ext}'
         super().save(*args, **kwargs)
 
     def __str__(self):

@@ -355,12 +355,31 @@ class EntryProductViewSet(ClientScopeMixin, viewsets.ModelViewSet):
         instance.delete()
 
 
-class EntryDetailViewSet(mixins.CreateModelMixin,
+class EntryDetailViewSet(ClientScopeMixin, mixins.CreateModelMixin,
                          mixins.UpdateModelMixin,
                          mixins.DestroyModelMixin,
                          viewsets.GenericViewSet):
     queryset = order_models.EntryDetail.objects.all().order_by('-created_at')
     serializer_class = serializers.EntryDetailSerializer
+    permission_classes = [IsAuthenticated, StrictDjangoModelPermissions]
+
+    client_field = 'entry__client'
+
+    def get_queryset(self):
+        return self.scope_to_user(super().get_queryset())
+
+    def perform_create(self, serializer):
+        user = self.request.user
+        entry = serializer.validated_data.get('entry')
+        if is_client_user(user):
+            if entry and entry.client_id != get_user_client_id(user):
+                from rest_framework.exceptions import PermissionDenied
+                raise PermissionDenied(
+                    'No puede modificar entradas de otro cliente')
+        serializer.save()
+
+    def perform_update(self, serializer):
+        return self.perform_create(serializer)
 
 
 class ExitFilter(FilterSet):
