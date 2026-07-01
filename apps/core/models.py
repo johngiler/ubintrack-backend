@@ -87,6 +87,7 @@ class CustomUser(AbstractUser):
         blank=True,
         related_name="custom_users",
         verbose_name="perfil del usuario",
+        help_text="Perfil asociado (solo usuarios tipo Empleado y Cliente).",
     )
 
     workspace = models.ForeignKey(
@@ -210,7 +211,8 @@ class Client(BaseModel):
         related_name="clients",
         verbose_name="workspace",
     )
-    name = models.CharField(max_length=200, null=True, verbose_name="nombre del cliente")
+    name = models.CharField(max_length=200, null=True,
+                            verbose_name="nombre del cliente")
     company = models.CharField(max_length=200, blank=True,
                                null=True, verbose_name='nombre de la compañía')
     address = models.TextField(blank=True, null=True, verbose_name='Dirección')
