@@ -6,7 +6,6 @@ from rest_framework.response import Response
 from rest_framework.parsers import MultiPartParser, FormParser
 from django_filters.rest_framework import DjangoFilterBackend
 from django.db import transaction
-import xlrd
 from django.http import HttpResponse
 from datetime import datetime
 
@@ -47,18 +46,6 @@ class ProductViewSet(ClientScopeMixin, viewsets.ModelViewSet):
     def perform_update(self, serializer):
         user = self.request.user
         if is_client_user(user):
-            instance = self.get_object()
-            new_status = serializer.validated_data.get(
-                'status', instance.status)
-            if new_status == choices.BinStatus.ALMACENADO:
-                qr_tag = self.request.data.get('qr_tag')
-                qr_position = self.request.data.get('qr_position')
-                if not (qr_tag and qr_position and qr_tag == instance.code and (
-                        instance.position and qr_position == instance.position.code)):
-                    from rest_framework.exceptions import PermissionDenied
-                    raise PermissionDenied(
-                        'Validación QR requerida para almacenar el bin.')
-
             serializer.save(client=get_user_client(user))
         else:
             serializer.save()

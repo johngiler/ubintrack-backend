@@ -18,11 +18,6 @@ class ProductAdmin(ClientFilterMixin, admin.ModelAdmin):
     search_fields = ('name', 'client_sku')
     autocomplete_fields = ('client',)
 
-    def get_form(self, request, obj=None, **kwargs):
-        form = super().get_form(request, obj, **kwargs)
-        form.request = request
-        return form
-
 
 class BinProductInline(admin.TabularInline):
     model = models.BinProduct
@@ -31,12 +26,6 @@ class BinProductInline(admin.TabularInline):
 
     def get_max_num(self, request, obj=None, **kwargs):
         return 1
-
-    def get_formset(self, request, obj=None, **kwargs):
-        formset = super().get_formset(request, obj, **kwargs)
-        formset.form.request = request
-        formset.form.bin_instance = obj
-        return formset
 
 
 @admin.register(models.Bin)
