@@ -18,9 +18,7 @@ apt-get install -y \
 
 echo "[setup] Ensuring user git and directory..."
 id git 2>/dev/null || useradd -m -s /bin/bash git
-mkdir -p /home/git/backend /home/git/backend/media
-mkdir -p /home/git/backend /home/git/backend/data
-mkdir -p /home/git/backend/logs
+mkdir -p /home/git/backend/media /home/git/backend/data /home/git/backend/logs
 chown -R git:git /home/git
 chmod 755 /home/git /home/git/backend
 chown git:www-data /home/git/backend/media
@@ -42,7 +40,7 @@ Ajusta LOCAL_BACKEND si tu repo no está en la ruta por defecto.
 ──────────────────────────────────────────────────────────────────────────────
 0) Variables (opcional, para pegar bloques siguientes)
 ──────────────────────────────────────────────────────────────────────────────
-LOCAL_BACKEND="/Users/jcgiler/BlackCubeTech/Publivalla/backend"
+LOCAL_BACKEND="/Users/jcgiler/BlackCubeTech/Ubintrack/backend"
 REMOTE_HOST="ubintrack-api"
 REMOTE_PATH="/home/git/backend"
 
@@ -105,13 +103,13 @@ ssh "${REMOTE_HOST}" "sudo chown -R git:www-data ${REMOTE_PATH}/staticfiles && s
 ──────────────────────────────────────────────────────────────────────────────
 ssh "${REMOTE_HOST}" "sudo cp ${REMOTE_PATH}/scripts/nginx/api.ubintrack.com.conf /etc/nginx/sites-available/api.ubintrack.com.conf && sudo ln -sf /etc/nginx/sites-available/api.ubintrack.com.conf /etc/nginx/sites-enabled/api.ubintrack.com.conf && sudo nginx -t && sudo systemctl reload nginx"
 
-ssh "${REMOTE_HOST}" "sudo cp ${REMOTE_PATH}/scripts/systemd/ubintrack-api.service /etc/systemd/system/ && sudo cp ${REMOTE_PATH}/scripts/systemd/ubintrack-celery.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl enable --now ubintrack-api ubintrack-celery"
+ssh "${REMOTE_HOST}" "sudo cp ${REMOTE_PATH}/scripts/systemd/ubintrack-api.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl enable --now ubintrack-api"
 
 # TLS (solo cuando el vhost responde en HTTP y el DNS está propagado)
 ssh "${REMOTE_HOST}" "sudo certbot --nginx -d api.ubintrack.com"
 
 ──────────────────────────────────────────────────────────────────────────────
-7) Cron de tareas (hold 72h, vencimiento de contratos, etc.)
+7) Cron de tareas (refresh dashboard)
 ──────────────────────────────────────────────────────────────────────────────
 ssh "${REMOTE_HOST}" "sudo -u git mkdir -p ${REMOTE_PATH}/logs && sudo cp ${REMOTE_PATH}/scripts/crond/ubintrack-backend.crontab /etc/cron.d/ubintrack-backend && sudo chmod 644 /etc/cron.d/ubintrack-backend"
 

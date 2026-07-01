@@ -1,5 +1,5 @@
 [Unit]
-Description=Publivalla API (Gunicorn)
+Description=Ubintrack API (Gunicorn)
 After=network.target postgresql.service
 
 [Service]

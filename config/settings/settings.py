@@ -10,7 +10,8 @@ from dotenv import load_dotenv
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 load_dotenv(BASE_DIR / ".env")
 
-SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "django-insecure-dev-only-ubintrack")
+SECRET_KEY = os.environ.get(
+    "DJANGO_SECRET_KEY", "django-insecure-dev-only-ubintrack")
 DEBUG = os.environ.get("DJANGO_DEBUG", "true").lower() in ("1", "true", "yes")
 
 ALLOWED_HOSTS = [
@@ -78,24 +79,12 @@ TEMPLATES = [
     },
 ]
 
-if os.environ.get("USE_SQLITE", "").lower() in ("1", "true", "yes"):
-    DATABASES = {
-        "default": {
-            "ENGINE": "django.db.backends.sqlite3",
-            "NAME": BASE_DIR / "db.sqlite3",
-        }
+DATABASES = {
+    "default": {
+        "ENGINE": "django.db.backends.sqlite3",
+        "NAME": BASE_DIR / "db.sqlite3",
     }
-else:
-    DATABASES = {
-        "default": {
-            "ENGINE": "django.db.backends.postgresql",
-            "NAME": os.environ.get("POSTGRES_DB", "ubintrack"),
-            "USER": os.environ.get("POSTGRES_USER", "ubintrack"),
-            "PASSWORD": os.environ.get("POSTGRES_PASSWORD", ""),
-            "HOST": os.environ.get("POSTGRES_HOST", "localhost"),
-            "PORT": os.environ.get("POSTGRES_PORT", "5432"),
-        }
-    }
+}
 
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
@@ -121,11 +110,14 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 AUTH_USER_MODEL = "core.CustomUser"
 
 # Multi-tenant SaaS (resolución en apps/workspaces/utils/tenant.py)
-DEFAULT_WORKSPACE_SLUG = os.environ.get("DEFAULT_WORKSPACE_SLUG", "").strip().lower()
+DEFAULT_WORKSPACE_SLUG = os.environ.get(
+    "DEFAULT_WORKSPACE_SLUG", "").strip().lower()
 TENANT_BASE_DOMAIN = os.environ.get("TENANT_BASE_DOMAIN", "").strip().lower()
 FRONTEND_BASE_URL = os.environ.get("FRONTEND_BASE_URL", "").strip().rstrip("/")
-FRONTEND_DEV_PORT = os.environ.get("FRONTEND_DEV_PORT", "3000").strip() or "3000"
-FRONTEND_URL_SCHEME = os.environ.get("FRONTEND_URL_SCHEME", "https").strip().lower()
+FRONTEND_DEV_PORT = os.environ.get(
+    "FRONTEND_DEV_PORT", "3000").strip() or "3000"
+FRONTEND_URL_SCHEME = os.environ.get(
+    "FRONTEND_URL_SCHEME", "https").strip().lower()
 
 if DEBUG:
     CORS_ALLOW_ALL_ORIGINS = True
@@ -142,7 +134,8 @@ else:
     ]
     _csrf_origins = os.environ.get("CSRF_TRUSTED_ORIGINS", "")
     if _csrf_origins.strip():
-        CSRF_TRUSTED_ORIGINS = [o.strip() for o in _csrf_origins.split(",") if o.strip()]
+        CSRF_TRUSTED_ORIGINS = [o.strip()
+                                for o in _csrf_origins.split(",") if o.strip()]
 
 CORS_ALLOW_HEADERS = (*default_headers, "x-workspace-slug")
 
@@ -160,11 +153,6 @@ REST_FRAMEWORK = {
     "PAGE_SIZE": 20,
 }
 
-try:
-    from .local_settings import *  # noqa: F403
-except ImportError:
-    pass
-
 if not DEBUG and TENANT_BASE_DOMAIN:
     import re as _re_cors
 
@@ -173,3 +161,8 @@ if not DEBUG and TENANT_BASE_DOMAIN:
     _cur = list(globals().get("CORS_ALLOWED_ORIGIN_REGEXES") or [])
     if _spa_tenant_pattern not in _cur:
         CORS_ALLOWED_ORIGIN_REGEXES = _cur + [_spa_tenant_pattern]
+
+try:
+    from .local_settings import *  # noqa: F403
+except ImportError:
+    pass
