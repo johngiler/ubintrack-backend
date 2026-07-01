@@ -2,9 +2,10 @@ from django.db import models
 
 
 class DashboardMonthlyAgg(models.Model):
-    """Materialized view: agregados mensuales para entradas/salidas/bins."""
+    """Materialized view: agregados mensuales por owner."""
 
-    month = models.DateField(primary_key=True)
+    workspace_id = models.IntegerField()
+    month = models.DateField()
     entries = models.IntegerField()
     exits = models.IntegerField()
     bins = models.IntegerField()
@@ -15,9 +16,10 @@ class DashboardMonthlyAgg(models.Model):
 
 
 class DashboardDailyAgg(models.Model):
-    """Materialized view: agregados diarios para entradas/salidas/bins."""
+    """Materialized view: agregados diarios por owner."""
 
-    day = models.DateField(primary_key=True)
+    workspace_id = models.IntegerField()
+    day = models.DateField()
     entries = models.IntegerField()
     exits = models.IntegerField()
     bins = models.IntegerField()
@@ -28,9 +30,10 @@ class DashboardDailyAgg(models.Model):
 
 
 class CavaStatsAgg(models.Model):
-    """Materialized view: resumen por cava (total/libre/ocupada/asignada)."""
+    """Materialized view: resumen por cava y owner."""
 
-    cava_id = models.IntegerField(primary_key=True)
+    workspace_id = models.IntegerField()
+    cava_id = models.IntegerField()
     total = models.IntegerField()
     libre = models.IntegerField()
     ocupada = models.IntegerField()
@@ -42,8 +45,10 @@ class CavaStatsAgg(models.Model):
 
 
 class HallStatsAgg(models.Model):
-    """Materialized view: resumen por cava y pasillo."""
+    """Materialized view: resumen por cava, pasillo y owner."""
+
     id = models.BigIntegerField(primary_key=True)
+    workspace_id = models.IntegerField()
     cava_id = models.IntegerField()
     hall = models.CharField(max_length=1)
     total = models.IntegerField()
@@ -57,7 +62,7 @@ class HallStatsAgg(models.Model):
 
 
 class EntriesCountersAgg(models.Model):
-    id = models.IntegerField(primary_key=True)
+    workspace_id = models.IntegerField(primary_key=True)
     total = models.IntegerField()
     pending = models.IntegerField()
     in_progress = models.IntegerField()
@@ -69,7 +74,7 @@ class EntriesCountersAgg(models.Model):
 
 
 class ExitsCountersAgg(models.Model):
-    id = models.IntegerField(primary_key=True)
+    workspace_id = models.IntegerField(primary_key=True)
     total = models.IntegerField()
     pending = models.IntegerField()
     in_progress = models.IntegerField()
@@ -81,7 +86,7 @@ class ExitsCountersAgg(models.Model):
 
 
 class BinsCountersAgg(models.Model):
-    id = models.IntegerField(primary_key=True)
+    workspace_id = models.IntegerField(primary_key=True)
     total = models.IntegerField()
     received = models.IntegerField()
     stored = models.IntegerField()
@@ -93,7 +98,8 @@ class BinsCountersAgg(models.Model):
 
 
 class ClientStatsAgg(models.Model):
-    client_id = models.IntegerField(primary_key=True)
+    workspace_id = models.IntegerField()
+    client_id = models.IntegerField()
     client_name = models.CharField(max_length=255)
     client_slug = models.CharField(max_length=255)
     positions_used = models.IntegerField()
