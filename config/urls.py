@@ -47,7 +47,6 @@ router.register(r"task-trackings", task_views.UserTaskTrackingViewSet)
 urlpatterns = [
     path("admin/", admin.site.urls),
     path("api/auth/login/", core_views.CustomObtainAuthToken.as_view()),
-    path("api/whoami/", core_views.WhoAmIView.as_view()),
     path("api/me/", core_views.MeProfileView.as_view()),
     path("api/workspace/current/", WorkspaceCurrentView.as_view(), name="workspace-current"),
     path("api/me/workspace/", WorkspaceMeView.as_view(), name="workspace-me"),

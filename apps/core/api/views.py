@@ -164,16 +164,6 @@ class BranchViewSet(WorkspaceScopeMixin, viewsets.ModelViewSet):
         return self.scope_to_workspace(super().get_queryset())
 
 
-class WhoAmIView(APIView):
-    permission_classes = [IsAuthenticated]
-
-    def get(self, request):
-        data = serializers.build_whoami_payload(request.user, request)
-        if data is None:
-            return Response(status=403)
-        return Response(data)
-
-
 class MeProfileView(APIView):
     """Perfil del usuario autenticado (lectura y actualización de datos propios)."""
 

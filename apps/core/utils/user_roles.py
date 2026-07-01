@@ -5,20 +5,12 @@ from __future__ import annotations
 from apps.core import choices
 
 
-LEGACY_CLIENT_TYPE = "usuario"
-
-
 def is_workspace_administrator(user) -> bool:
     return getattr(user, "user_type", None) == choices.UserType.ADMINISTRATOR
 
 
-def is_employee(user) -> bool:
-    return getattr(user, "user_type", None) == choices.UserType.EMPLOYEE
-
-
 def is_client_user(user) -> bool:
-    user_type = getattr(user, "user_type", None)
-    return user_type in (choices.UserType.CLIENT, LEGACY_CLIENT_TYPE)
+    return getattr(user, "user_type", None) == choices.UserType.CLIENT
 
 
 def user_bypasses_permissions(user) -> bool:
