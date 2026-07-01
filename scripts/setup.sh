@@ -94,7 +94,7 @@ ssh "${REMOTE_HOST}" "sudo -u git bash -lc 'cd ${REMOTE_PATH} && python3 -m venv
 ──────────────────────────────────────────────────────────────────────────────
 5) Migraciones, workspace por defecto y estáticos del admin
 ──────────────────────────────────────────────────────────────────────────────
-ssh "${REMOTE_HOST}" "sudo -u git bash -lc 'cd ${REMOTE_PATH} && .venv/bin/python manage.py migrate --noinput && .venv/bin/python manage.py ensure_default_workspace && .venv/bin/python manage.py collectstatic --noinput'"
+ssh "${REMOTE_HOST}" "sudo -u git bash -lc 'cd ${REMOTE_PATH} && .venv/bin/python manage.py migrate --noinput && .venv/bin/python manage.py seed_platform_data && .venv/bin/python manage.py ensure_default_workspace && .venv/bin/python manage.py collectstatic --noinput'"
 
 ssh "${REMOTE_HOST}" "sudo chown -R git:www-data ${REMOTE_PATH}/staticfiles && sudo find ${REMOTE_PATH}/staticfiles -type d -exec chmod 2775 {} \\; && sudo find ${REMOTE_PATH}/staticfiles -type f -exec chmod 664 {} \\;"
 
