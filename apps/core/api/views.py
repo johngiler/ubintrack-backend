@@ -1,7 +1,7 @@
 from rest_framework import mixins, viewsets, filters
 from rest_framework.views import APIView
 from rest_framework.permissions import IsAuthenticated, BasePermission
-from utils.permissions_mixins import ClientScopeMixin, StrictDjangoModelPermissions, WorkspaceScopeMixin
+from apps.common.utils.permissions_mixins import ClientScopeMixin, StrictDjangoModelPermissions, WorkspaceScopeMixin
 from rest_framework.authtoken.views import ObtainAuthToken
 from rest_framework.authtoken.models import Token
 from rest_framework.response import Response
@@ -11,12 +11,12 @@ from django_filters.rest_framework import DjangoFilterBackend
 
 from apps.core import models as core_models
 from apps.core import choices as core_choices
-from apps.core.user_roles import (
+from apps.core.utils.user_roles import (
     can_manage_as_administrator,
     get_user_client,
     is_workspace_administrator,
 )
-from apps.workspaces.tenant import get_workspace_for_request, is_platform_staff, user_can_login_frontend
+from apps.workspaces.utils.tenant import get_workspace_for_request, is_platform_staff, user_can_login_frontend
 
 LOGIN_FAILED_MESSAGE = "Credenciales inválidas"
 from . import serializers

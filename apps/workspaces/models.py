@@ -13,7 +13,7 @@ from apps.common.utils.media_layout import (
     workspace_brand_logo_mark_upload,
     workspace_brand_logo_upload,
 )
-from apps.workspaces.validators import (
+from apps.workspaces.utils.validators import (
     validate_brand_graphic,
     validate_favicon_file,
 )

@@ -1,6 +1,6 @@
 from django.contrib import admin
 from django.utils.html import mark_safe
-from apps.core.admin_mixins import ClientFilterMixin
+from apps.core.admin.mixins import ClientFilterMixin
 
 from . import models
 

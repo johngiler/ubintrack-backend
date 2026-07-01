@@ -1,4 +1,4 @@
-from apps.core.user_roles import get_user_client
+from apps.core.utils.user_roles import get_user_client
 
 
 class ClientFilterMixin:

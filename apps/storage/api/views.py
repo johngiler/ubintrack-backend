@@ -1,9 +1,9 @@
 from rest_framework import viewsets, filters, status
 from rest_framework.exceptions import ValidationError
-from apps.core.user_roles import get_user_client, is_client_user, can_manage_as_administrator
+from apps.core.utils.user_roles import get_user_client, is_client_user, can_manage_as_administrator
 from rest_framework.permissions import IsAuthenticated
-from utils.permissions_mixins import DenyClientUsers, StrictDjangoModelPermissions, WorkspaceScopeMixin
-from apps.workspaces.tenant import get_workspace_for_request
+from apps.common.utils.permissions_mixins import DenyClientUsers, StrictDjangoModelPermissions, WorkspaceScopeMixin
+from apps.workspaces.utils.tenant import get_workspace_for_request
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from apps.common.pagination import MediumPagination
@@ -13,7 +13,7 @@ from django.db.models import Prefetch, Q
 
 from apps.storage import models as storage_models
 from apps.inventory import models as inventory_models
-from utils.zebra import print_to_zebra
+from apps.common.utils.zebra import print_to_zebra
 
 from . import serializers
 

@@ -1,6 +1,6 @@
 from rest_framework import viewsets, mixins, filters
 from rest_framework.permissions import IsAuthenticated
-from utils.permissions_mixins import StrictDjangoModelPermissions, DenyClientUsers
+from apps.common.utils.permissions_mixins import StrictDjangoModelPermissions, DenyClientUsers
 from django_filters.rest_framework import DjangoFilterBackend
 from apps.task import models as task_models
 from . import serializers

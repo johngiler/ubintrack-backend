@@ -4,7 +4,7 @@ from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.permissions import IsAuthenticated
-from utils.permissions_mixins import StrictDjangoModelPermissions
+from apps.common.utils.permissions_mixins import StrictDjangoModelPermissions
 
 from apps.storage.models import Storage, Cava
 from apps.dashboard.models import DashboardMonthlyAgg, DashboardDailyAgg

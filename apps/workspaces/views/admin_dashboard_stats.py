@@ -18,7 +18,7 @@ from apps.malls.models import ShoppingCenter
 from apps.orders.models import Order, OrderItem, OrderStatus
 from apps.users.permissions import IsAdminRole
 from apps.workspaces.utils.dashboard_metrics import _empty_metrics, build_extended_metrics
-from apps.workspaces.tenant import get_workspace_for_request
+from apps.workspaces.utils.tenant import get_workspace_for_request
 
 _EMPTY = {
     "counts": {

@@ -1,6 +1,6 @@
 from django.http import JsonResponse
 
-from apps.workspaces.tenant import resolve_request_workspace
+from apps.workspaces.utils.tenant import resolve_request_workspace
 
 
 class TenantMiddleware:

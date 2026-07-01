@@ -1,5 +1,5 @@
 from rest_framework import viewsets, filters, status
-from apps.core.user_roles import get_user_client, get_user_client_id, is_client_user, can_manage_as_administrator
+from apps.core.utils.user_roles import get_user_client, get_user_client_id, is_client_user, can_manage_as_administrator
 from rest_framework.permissions import IsAuthenticated, DjangoModelPermissions
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -12,9 +12,9 @@ from datetime import datetime
 
 from apps.inventory import models as inventory_models
 from apps.inventory.services import export_bin_entries_excel
-from utils.permissions_mixins import ClientScopeMixin, StrictDjangoModelPermissions
+from apps.common.utils.permissions_mixins import ClientScopeMixin, StrictDjangoModelPermissions
 from apps.core import choices
-from utils.zebra import print_to_zebra
+from apps.common.utils.zebra import print_to_zebra
 
 from . import serializers
 

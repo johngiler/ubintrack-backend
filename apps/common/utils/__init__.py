@@ -1,1 +1,1 @@
-"""Utilidades compartidas (layout de media, imágenes WebP, rutas de data por tenant)."""
+"""Helpers compartidos entre apps (media, imágenes, permisos DRF, impresión)."""

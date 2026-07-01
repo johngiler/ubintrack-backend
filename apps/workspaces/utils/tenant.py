@@ -13,7 +13,7 @@ from urllib.parse import urlparse
 from django.conf import settings
 
 from apps.core import choices as core_choices
-from apps.core.user_roles import get_user_client, is_client_user
+from apps.core.utils.user_roles import get_user_client, is_client_user
 from apps.workspaces.models import Workspace
 
 RESERVED_SUBDOMAINS = frozenset({"www", "api", "cdn"})

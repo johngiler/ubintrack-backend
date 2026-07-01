@@ -113,7 +113,7 @@ class CustomUser(AbstractUser):
         if self.is_superuser:
             return set()
 
-        from apps.core.user_roles import user_bypasses_permissions
+        from apps.core.utils.user_roles import user_bypasses_permissions
         if user_bypasses_permissions(self):
             return set()
 
@@ -126,14 +126,14 @@ class CustomUser(AbstractUser):
         return perms
 
     def has_perm(self, perm, obj=None):
-        from apps.core.user_roles import user_bypasses_permissions
+        from apps.core.utils.user_roles import user_bypasses_permissions
         if user_bypasses_permissions(self):
             return True
 
         return perm in self.get_all_permissions(obj)
 
     def has_module_perms(self, app_label):
-        from apps.core.user_roles import user_bypasses_permissions
+        from apps.core.utils.user_roles import user_bypasses_permissions
         if user_bypasses_permissions(self):
             return True
 

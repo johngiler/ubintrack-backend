@@ -3,8 +3,8 @@ from django.contrib.auth.models import Permission as DjangoPermission
 
 from apps.core import choices
 from apps.core import models as core_models
-from apps.core.user_roles import get_user_client, is_workspace_administrator
-from apps.workspaces.tenant import get_workspace_for_request, user_can_login_frontend
+from apps.core.utils.user_roles import get_user_client, is_workspace_administrator
+from apps.workspaces.utils.tenant import get_workspace_for_request, user_can_login_frontend
 
 
 class CustomPermissionSerializer(serializers.ModelSerializer):

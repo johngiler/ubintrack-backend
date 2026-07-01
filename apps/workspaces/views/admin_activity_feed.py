@@ -16,7 +16,7 @@ from apps.clients.models import Client
 from apps.orders.models import OrderStatus, OrderStatusEvent
 from apps.users.models import UserProfile
 from apps.users.permissions import IsAdminRole
-from apps.workspaces.tenant import get_workspace_for_request
+from apps.workspaces.utils.tenant import get_workspace_for_request
 
 User = get_user_model()
 

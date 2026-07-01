@@ -3,12 +3,12 @@ from typing import Any
 from django.db.models import QuerySet
 from rest_framework.permissions import DjangoModelPermissions, BasePermission
 
-from apps.core.user_roles import (
+from apps.core.utils.user_roles import (
     get_user_client_id,
     is_client_user,
     user_bypasses_permissions,
 )
-from apps.workspaces.tenant import get_workspace_for_request, is_platform_staff
+from apps.workspaces.utils.tenant import get_workspace_for_request, is_platform_staff
 
 
 class WorkspaceScopeMixin:

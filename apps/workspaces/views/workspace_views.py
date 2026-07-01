@@ -7,13 +7,13 @@ from rest_framework.permissions import BasePermission, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.core.user_roles import can_manage_as_administrator
+from apps.core.utils.user_roles import can_manage_as_administrator
 from apps.workspaces.serializers import (
     WorkspaceMeReadSerializer,
     WorkspaceMeUpdateSerializer,
     WorkspacePublicSerializer,
 )
-from apps.workspaces.tenant import get_workspace_for_request, user_can_access_workspace
+from apps.workspaces.utils.tenant import get_workspace_for_request, user_can_access_workspace
 
 logger = logging.getLogger(__name__)
 

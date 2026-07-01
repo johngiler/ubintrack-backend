@@ -2,7 +2,7 @@ from rest_framework import viewsets, status, filters
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
-from utils.permissions_mixins import StrictDjangoModelPermissions, DenyClientUsers
+from apps.common.utils.permissions_mixins import StrictDjangoModelPermissions, DenyClientUsers
 from django_filters.rest_framework import DjangoFilterBackend
 from apps.finance import models as finance_models
 from apps.finance import services as finance_services

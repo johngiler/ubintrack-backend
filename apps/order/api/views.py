@@ -1,5 +1,5 @@
 from rest_framework import mixins, viewsets, filters
-from apps.core.user_roles import get_user_client, get_user_client_id, is_client_user, can_manage_as_administrator
+from apps.core.utils.user_roles import get_user_client, get_user_client_id, is_client_user, can_manage_as_administrator
 from rest_framework.permissions import IsAuthenticated, DjangoModelPermissions
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -15,7 +15,7 @@ from apps.order import models as order_models
 from apps.order.services import export_entry_excel, export_exit_excel
 from apps.inventory import models as inventory_models
 from apps.core.choices import BinStatus
-from utils.permissions_mixins import ClientScopeMixin, StrictDjangoModelPermissions
+from apps.common.utils.permissions_mixins import ClientScopeMixin, StrictDjangoModelPermissions
 from . import serializers
 
 

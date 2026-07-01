@@ -1,7 +1,7 @@
 import os
 from django.core.management.base import BaseCommand
 from apps.storage.models import Position
-from utils.zebra import print_to_zebra
+from apps.common.utils.zebra import print_to_zebra
 
 
 class Command(BaseCommand):

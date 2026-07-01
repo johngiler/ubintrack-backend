@@ -1,7 +1,7 @@
 from django.core.management.base import BaseCommand
 
 from apps.workspaces.models import Workspace
-from apps.workspaces.tenant import default_workspace_slug
+from apps.workspaces.utils.tenant import default_workspace_slug
 
 
 class Command(BaseCommand):
