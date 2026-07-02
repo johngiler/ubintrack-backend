@@ -1,5 +1,5 @@
 # Ubintrack — tareas programadas del backend (producción)
-# Instalar: sudo cp scripts/crond/ubintrack-backend.crontab /etc/cron.d/ubintrack-backend
+# Instalar: sudo cp scripts/crond/ubintrack-api.crontab /etc/cron.d/ubintrack-api
 SHELL=/bin/bash
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 

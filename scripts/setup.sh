@@ -57,6 +57,7 @@ rsync -avz \
   --exclude '.env.local' \
   --exclude '.env.production' \
   --exclude 'config/settings/local_settings.py' \
+  --exclude 'config/settings/local_settings.production.py' \
   --exclude 'db.sqlite3' \
   --exclude 'staticfiles' \
   --exclude 'static' \
@@ -121,12 +122,12 @@ ssh "${REMOTE_HOST}" "sudo certbot --nginx -d api.ubintrack.com"
 ──────────────────────────────────────────────────────────────────────────────
 7) Cron de tareas (refresh dashboard; una sola vez, o al cambiar el crontab)
 ──────────────────────────────────────────────────────────────────────────────
-scp "$LOCAL_BACKEND/scripts/crond/ubintrack-backend.crontab" \
-  "${REMOTE_HOST}:/tmp/ubintrack-backend.crontab"
+scp "$LOCAL_BACKEND/scripts/crond/ubintrack-api.crontab" \
+  "${REMOTE_HOST}:/tmp/ubintrack-api.crontab"
 
 ssh "${REMOTE_HOST}" "sudo -u git mkdir -p ${REMOTE_PATH}/logs && \
-  sudo cp /tmp/ubintrack-backend.crontab /etc/cron.d/ubintrack-backend && \
-  sudo chmod 644 /etc/cron.d/ubintrack-backend"
+  sudo cp /tmp/ubintrack-api.crontab /etc/cron.d/ubintrack-api && \
+  sudo chmod 644 /etc/cron.d/ubintrack-api"
 
 ──────────────────────────────────────────────────────────────────────────────
 Deploys siguientes (solo código y reinicio de API; ver scripts/deploy.sh)
