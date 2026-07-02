@@ -99,23 +99,43 @@ ssh "${REMOTE_HOST}" "sudo -u git bash -lc 'cd ${REMOTE_PATH} && .venv/bin/pytho
 ssh "${REMOTE_HOST}" "sudo chown -R git:www-data ${REMOTE_PATH}/staticfiles && sudo find ${REMOTE_PATH}/staticfiles -type d -exec chmod 2775 {} \\; && sudo find ${REMOTE_PATH}/staticfiles -type f -exec chmod 664 {} \\;"
 
 ──────────────────────────────────────────────────────────────────────────────
-6) Nginx + systemd (en el servidor; DNS de api.ubintrack.com debe apuntar al host)
+6) Nginx + systemd (una sola vez; DNS de api.ubintrack.com debe apuntar al host)
 ──────────────────────────────────────────────────────────────────────────────
-ssh "${REMOTE_HOST}" "sudo cp ${REMOTE_PATH}/scripts/nginx/api.ubintrack.com.conf /etc/nginx/sites-available/api.ubintrack.com.conf && sudo ln -sf /etc/nginx/sites-available/api.ubintrack.com.conf /etc/nginx/sites-enabled/api.ubintrack.com.conf && sudo nginx -t && sudo systemctl reload nginx"
+scp "$LOCAL_BACKEND/scripts/nginx/api.ubintrack.com.conf" \
+  "${REMOTE_HOST}:/tmp/api.ubintrack.com.conf"
 
-ssh "${REMOTE_HOST}" "sudo cp ${REMOTE_PATH}/scripts/systemd/ubintrack-api.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl enable --now ubintrack-api"
+ssh "${REMOTE_HOST}" "sudo cp /tmp/api.ubintrack.com.conf /etc/nginx/sites-available/api.ubintrack.com.conf && \
+  sudo ln -sf /etc/nginx/sites-available/api.ubintrack.com.conf /etc/nginx/sites-enabled/api.ubintrack.com.conf && \
+  sudo nginx -t && sudo systemctl reload nginx"
+
+scp "$LOCAL_BACKEND/scripts/systemd/ubintrack-api.service" \
+  "${REMOTE_HOST}:/tmp/ubintrack-api.service"
+
+ssh "${REMOTE_HOST}" "sudo cp /tmp/ubintrack-api.service /etc/systemd/system/ubintrack-api.service && \
+  sudo systemctl daemon-reload && \
+  sudo systemctl enable --now ubintrack-api"
 
 # TLS (solo cuando el vhost responde en HTTP y el DNS está propagado)
 ssh "${REMOTE_HOST}" "sudo certbot --nginx -d api.ubintrack.com"
 
 ──────────────────────────────────────────────────────────────────────────────
-7) Cron de tareas (refresh dashboard)
+7) Cron de tareas (refresh dashboard; una sola vez, o al cambiar el crontab)
 ──────────────────────────────────────────────────────────────────────────────
-ssh "${REMOTE_HOST}" "sudo -u git mkdir -p ${REMOTE_PATH}/logs && sudo cp ${REMOTE_PATH}/scripts/crond/ubintrack-backend.crontab /etc/cron.d/ubintrack-backend && sudo chmod 644 /etc/cron.d/ubintrack-backend"
+scp "$LOCAL_BACKEND/scripts/crond/ubintrack-backend.crontab" \
+  "${REMOTE_HOST}:/tmp/ubintrack-backend.crontab"
+
+ssh "${REMOTE_HOST}" "sudo -u git mkdir -p ${REMOTE_PATH}/logs && \
+  sudo cp /tmp/ubintrack-backend.crontab /etc/cron.d/ubintrack-backend && \
+  sudo chmod 644 /etc/cron.d/ubintrack-backend"
 
 ──────────────────────────────────────────────────────────────────────────────
-Deploys siguientes (solo código; usa --delete; ver scripts/deploy.sh)
+Deploys siguientes (solo código y reinicio de API; ver scripts/deploy.sh)
 ──────────────────────────────────────────────────────────────────────────────
 cd "$LOCAL_BACKEND" && ./scripts/deploy.sh
+
+Nota: deploy.sh sincroniza el código Django, instala deps, migra, collectstatic y
+      reinicia ubintrack-api. No toca nginx, systemd ni cron.
+      Si cambias esos archivos, vuelve a copiarlos aquí y ejecuta daemon-reload /
+      reload nginx según corresponda.
 
 EOF
