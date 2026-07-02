@@ -1,15 +1,16 @@
 import os
 import socket
 import logging
+from pathlib import Path
+
 from dotenv import load_dotenv
 
-# Cargar variables de entorno
-load_dotenv()
+load_dotenv(Path(__file__).resolve().parents[3] / ".env")
 
 logger = logging.getLogger(__name__)
-# Obtener configuración del .env o usar valores por defecto
-printer_ip = os.getenv('ZEBRA_PRINTER_IP', '190.122.189.156')
-printer_port = int(os.getenv('ZEBRA_PRINTER_PORT', '9100'))
+# SO / impresora: .env en prod; defaults locales en dev (sin .env).
+printer_ip = os.getenv("ZEBRA_PRINTER_IP", "127.0.0.1")
+printer_port = int(os.getenv("ZEBRA_PRINTER_PORT", "9100"))
 
 
 def print_to_zebra(zpl_data):

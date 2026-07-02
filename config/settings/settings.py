@@ -1,5 +1,11 @@
 """
-Configuración Django — API multi-tenant WMS (Ubintrack).
+Configuración común del proyecto + defaults de desarrollo local.
+
+Convención:
+- settings.py          → compartido + Django dev (SQLite, DEBUG=True, CORS abierto).
+- local_settings.py    → vacío en dev (gitignored); copia de production en el servidor.
+- local_settings.production.py → Django producción (gitignored; ver .example).
+- .env                 → variables de SO/servicios (Postgres, Zebra, etc.); vacío en dev.
 """
 import os
 from pathlib import Path
@@ -8,21 +14,25 @@ from corsheaders.defaults import default_headers
 from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
+
+# Solo variables de SO / servicios externos (no configuración Django).
 load_dotenv(BASE_DIR / ".env")
 
-SECRET_KEY = os.environ.get(
-    "DJANGO_SECRET_KEY", "django-insecure-dev-only-ubintrack")
-DEBUG = os.environ.get("DJANGO_DEBUG", "true").lower() in ("1", "true", "yes")
+# --- Desarrollo local (producción sobrescribe vía local_settings.py) ---
+SECRET_KEY = "django-insecure-dev-only-ubintrack"
+DEBUG = True
 
-ALLOWED_HOSTS = [
-    h.strip()
-    for h in os.environ.get("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
-    if h.strip()
-]
-if DEBUG:
-    for _suffix in (".localhost", ".lvh.me"):
-        if _suffix not in ALLOWED_HOSTS:
-            ALLOWED_HOSTS.append(_suffix)
+ALLOWED_HOSTS = ["localhost", "127.0.0.1", ".localhost", ".lvh.me"]
+
+DEFAULT_WORKSPACE_SLUG = "rbcold"
+TENANT_BASE_DOMAIN = "localhost"
+FRONTEND_BASE_URL = ""
+FRONTEND_DEV_PORT = "3000"
+FRONTEND_URL_SCHEME = "http"
+
+CORS_ALLOW_ALL_ORIGINS = True
+CORS_ALLOWED_ORIGINS = []
+CORS_ALLOW_HEADERS = (*default_headers, "x-workspace-slug")
 
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -109,36 +119,6 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 AUTH_USER_MODEL = "core.CustomUser"
 
-# Multi-tenant SaaS (resolución en apps/workspaces/utils/tenant.py)
-DEFAULT_WORKSPACE_SLUG = os.environ.get(
-    "DEFAULT_WORKSPACE_SLUG", "").strip().lower()
-TENANT_BASE_DOMAIN = os.environ.get("TENANT_BASE_DOMAIN", "").strip().lower()
-FRONTEND_BASE_URL = os.environ.get("FRONTEND_BASE_URL", "").strip().rstrip("/")
-FRONTEND_DEV_PORT = os.environ.get(
-    "FRONTEND_DEV_PORT", "3000").strip() or "3000"
-FRONTEND_URL_SCHEME = os.environ.get(
-    "FRONTEND_URL_SCHEME", "https").strip().lower()
-
-if DEBUG:
-    CORS_ALLOW_ALL_ORIGINS = True
-    CORS_ALLOWED_ORIGINS = []
-else:
-    CORS_ALLOW_ALL_ORIGINS = False
-    CORS_ALLOWED_ORIGINS = [
-        o.strip()
-        for o in os.environ.get(
-            "CORS_ALLOWED_ORIGINS",
-            "http://localhost:3000,http://127.0.0.1:3000",
-        ).split(",")
-        if o.strip()
-    ]
-    _csrf_origins = os.environ.get("CSRF_TRUSTED_ORIGINS", "")
-    if _csrf_origins.strip():
-        CSRF_TRUSTED_ORIGINS = [o.strip()
-                                for o in _csrf_origins.split(",") if o.strip()]
-
-CORS_ALLOW_HEADERS = (*default_headers, "x-workspace-slug")
-
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (
         "rest_framework.authentication.TokenAuthentication",
@@ -152,15 +132,6 @@ REST_FRAMEWORK = {
     "DEFAULT_PAGINATION_CLASS": "apps.common.pagination.StandardPagination",
     "PAGE_SIZE": 20,
 }
-
-if not DEBUG and TENANT_BASE_DOMAIN:
-    import re as _re_cors
-
-    _apex_esc = _re_cors.escape(TENANT_BASE_DOMAIN.strip().lower())
-    _spa_tenant_pattern = rf"^https://[a-z0-9]([a-z0-9-]*[a-z0-9])?\.{_apex_esc}$"
-    _cur = list(globals().get("CORS_ALLOWED_ORIGIN_REGEXES") or [])
-    if _spa_tenant_pattern not in _cur:
-        CORS_ALLOWED_ORIGIN_REGEXES = _cur + [_spa_tenant_pattern]
 
 try:
     from .local_settings import *  # noqa: F403

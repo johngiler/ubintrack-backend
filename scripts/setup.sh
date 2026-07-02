@@ -71,12 +71,12 @@ rsync -avz \
 ssh "${REMOTE_HOST}" "sudo chown -R git:git ${REMOTE_PATH} && sudo chmod 755 /home/git /home/git/backend && sudo chown git:www-data ${REMOTE_PATH}/media ${REMOTE_PATH}/data 2>/dev/null || true && sudo chmod 2775 ${REMOTE_PATH}/media ${REMOTE_PATH}/data 2>/dev/null || true"
 
 ──────────────────────────────────────────────────────────────────────────────
-2) Secretos y settings de producción (desde tu máquina)
+2) Secretos de SO + Django producción (desde tu máquina)
 ──────────────────────────────────────────────────────────────────────────────
-# .env de producción (revisa valores antes de subir)
+# SO / servicios (Postgres, Zebra) → .env del servidor
 scp "$LOCAL_BACKEND/.env.production" "${REMOTE_HOST}:${REMOTE_PATH}/.env"
 
-# Overrides Django (plantilla versionada en el repo)
+# Django producción → local_settings.py del servidor
 scp "$LOCAL_BACKEND/config/settings/local_settings.production.py" \
   "${REMOTE_HOST}:${REMOTE_PATH}/config/settings/local_settings.py"
 
