@@ -104,7 +104,8 @@ class LegacyRbcoldImporter:
         self.parsed_dir = resolve_parsed_dir(parsed_dir)
         self.dry_run = dry_run
         self.clear_workspace = clear_workspace
-        self.id_maps: dict[str, dict[str, int]] = {key: {} for key in LEGACY_TABLES}
+        self.id_maps: dict[str, dict[str, int]] = {
+            key: {} for key in LEGACY_TABLES}
         self.stats: dict[str, int] = {}
         self.warnings: list[str] = []
 
@@ -145,19 +146,22 @@ class LegacyRbcoldImporter:
 
     def _clear_workspace_data(self, workspace: Workspace) -> None:
         if self.dry_run:
-            self.warnings.append("[dry-run] Se omitió borrado de datos del workspace.")
+            self.warnings.append(
+                "[dry-run] Se omitió borrado de datos del workspace.")
             return
 
         ExitProduct.objects.filter(
             exit_product_group__exit__client__workspace=workspace
         ).delete()
         ExitMovement.objects.filter(exit__client__workspace=workspace).delete()
-        ExitProductGroup.objects.filter(exit__client__workspace=workspace).delete()
+        ExitProductGroup.objects.filter(
+            exit__client__workspace=workspace).delete()
         Exit.objects.filter(client__workspace=workspace).delete()
         BinMovement.objects.filter(bin__client__workspace=workspace).delete()
         BinProduct.objects.filter(bin__client__workspace=workspace).delete()
         Bin.objects.filter(client__workspace=workspace).delete()
-        EntryProduct.objects.filter(entry__client__workspace=workspace).delete()
+        EntryProduct.objects.filter(
+            entry__client__workspace=workspace).delete()
         Entry.objects.filter(client__workspace=workspace).delete()
         Product.objects.filter(client__workspace=workspace).delete()
         Client.objects.filter(workspace=workspace).delete()
@@ -192,9 +196,10 @@ class LegacyRbcoldImporter:
                 self.id_maps[key][legacy_id] = int(legacy_id)
             return
         for start in range(0, len(objects), BULK_BATCH_SIZE):
-            chunk = objects[start : start + BULK_BATCH_SIZE]
-            chunk_ids = legacy_ids[start : start + BULK_BATCH_SIZE]
-            created = model.objects.bulk_create(chunk, batch_size=BULK_BATCH_SIZE)
+            chunk = objects[start: start + BULK_BATCH_SIZE]
+            chunk_ids = legacy_ids[start: start + BULK_BATCH_SIZE]
+            created = model.objects.bulk_create(
+                chunk, batch_size=BULK_BATCH_SIZE)
             for legacy_id, obj in zip(chunk_ids, created):
                 self.id_maps[key][legacy_id] = obj.pk
             self._bump(key, len(chunk))
@@ -258,25 +263,33 @@ class LegacyRbcoldImporter:
                 Tariff(
                     workspace=workspace,
                     name=row["name"],
-                    in_pallet_frozen=_parse_decimal(row.get("in_pallet_frozen")),
+                    in_pallet_frozen=_parse_decimal(
+                        row.get("in_pallet_frozen")),
                     in_floor_frozen=_parse_decimal(row.get("in_floor_frozen")),
                     out_frozen=_parse_decimal(row.get("out_frozen")),
-                    in_pallet_refrigerated=_parse_decimal(row.get("in_pallet_refrigerated")),
-                    in_floor_refrigerated=_parse_decimal(row.get("in_floor_refrigerated")),
-                    out_refrigerated=_parse_decimal(row.get("out_refrigerated")),
+                    in_pallet_refrigerated=_parse_decimal(
+                        row.get("in_pallet_refrigerated")),
+                    in_floor_refrigerated=_parse_decimal(
+                        row.get("in_floor_refrigerated")),
+                    out_refrigerated=_parse_decimal(
+                        row.get("out_refrigerated")),
                     in_pallet_dry=_parse_decimal(row.get("in_pallet_dry")),
                     in_floor_dry=_parse_decimal(row.get("in_floor_dry")),
                     out_dry=_parse_decimal(row.get("out_dry")),
-                    refrigerated_storage=_parse_decimal(row.get("refrigerated_storage")),
+                    refrigerated_storage=_parse_decimal(
+                        row.get("refrigerated_storage")),
                     frozen_storage=_parse_decimal(row.get("frozen_storage")),
                     dry_storage=_parse_decimal(row.get("dry_storage")),
                     picking=_parse_decimal(row.get("picking")),
-                    has_picking_tariff=_parse_bool(row.get("has_picking_tariff")),
+                    has_picking_tariff=_parse_bool(
+                        row.get("has_picking_tariff")),
                     restiba=_parse_decimal(row.get("restiba")),
                     added_pallet=_parse_decimal(row.get("added_pallet")),
                     wrap=_parse_decimal(row.get("wrap")),
-                    rotation_threshold=_parse_decimal(row.get("rotation_threshold"), "0.40"),
-                    static_penalty_rate=_parse_decimal(row.get("static_penalty_rate"), "0.80"),
+                    rotation_threshold=_parse_decimal(
+                        row.get("rotation_threshold"), "0.40"),
+                    static_penalty_rate=_parse_decimal(
+                        row.get("static_penalty_rate"), "0.80"),
                     created_at=_parse_dt(row.get("created_at")),
                     updated_at=_parse_dt(row.get("updated_at")),
                 )
@@ -306,7 +319,8 @@ class LegacyRbcoldImporter:
         objects = []
         legacy_ids = []
         for row in rows:
-            storage_id = _map_id(self.id_maps, "storages", row.get("storage_id"))
+            storage_id = _map_id(self.id_maps, "storages",
+                                 row.get("storage_id"))
             objects.append(
                 Cava(
                     storage_id=storage_id,
@@ -317,7 +331,8 @@ class LegacyRbcoldImporter:
                     temp_min=_parse_int(row.get("temp_min")),
                     temp_max=_parse_int(row.get("temp_max")),
                     total_levels=_parse_int(row.get("total_levels"), 0) or 0,
-                    positions_has_been_generated=_parse_bool(row.get("positions_has_been_generated")),
+                    positions_has_been_generated=_parse_bool(
+                        row.get("positions_has_been_generated")),
                     is_virtual=_parse_bool(row.get("is_virtual")),
                     created_at=_parse_dt(row.get("created_at")),
                     updated_at=_parse_dt(row.get("updated_at")),
@@ -369,8 +384,10 @@ class LegacyRbcoldImporter:
                     random_id=row["random_id"],
                     slug=row.get("slug"),
                     tariff_id=tariff_id,
-                    cold_positions=_parse_int(row.get("cold_positions"), 0) or 0,
-                    frozen_positions=_parse_int(row.get("frozen_positions"), 0) or 0,
+                    cold_positions=_parse_int(
+                        row.get("cold_positions"), 0) or 0,
+                    frozen_positions=_parse_int(
+                        row.get("frozen_positions"), 0) or 0,
                     created_at=_parse_dt(row.get("created_at")),
                     updated_at=_parse_dt(row.get("updated_at")),
                 )
@@ -386,7 +403,8 @@ class LegacyRbcoldImporter:
         for row in rows:
             client_id = _map_id(self.id_maps, "clients", row.get("client_id"))
             if not client_id:
-                self.warnings.append(f"Sucursal legacy id={row.get('id')} sin client_id mapeado; omitida.")
+                self.warnings.append(
+                    f"Sucursal legacy id={row.get('id')} sin client_id mapeado; omitida.")
                 continue
             objects.append(
                 Branch(
@@ -440,9 +458,9 @@ class LegacyRbcoldImporter:
             return
 
         for row in rows:
-            profile_id = _map_id(self.id_maps, "profiles", row.get("profile_id"))
+            profile_id = _map_id(self.id_maps, "profiles",
+                                 row.get("profile_id"))
             user_type = row.get("user_type") or core_choices.UserType.EMPLOYEE
-            is_client = user_type == core_choices.UserType.CLIENT
             user = CustomUser(
                 password=row["password"],
                 last_login=_parse_dt(row.get("last_login")),
@@ -457,7 +475,7 @@ class LegacyRbcoldImporter:
                 full_name=row.get("full_name"),
                 user_type=user_type,
                 profile_id=profile_id,
-                workspace=None if is_client else workspace,
+                workspace=workspace,
             )
             user.save()
             self.id_maps["users"][str(row["id"])] = user.pk
@@ -472,7 +490,8 @@ class LegacyRbcoldImporter:
         for row in rows:
             client_id = _map_id(self.id_maps, "clients", row.get("client_id"))
             if not client_id:
-                self.warnings.append(f"client_user legacy id={row.get('id')} sin client_id; omitido.")
+                self.warnings.append(
+                    f"client_user legacy id={row.get('id')} sin client_id; omitido.")
                 continue
 
             legacy_user_id = row.get("user_id")
@@ -486,7 +505,7 @@ class LegacyRbcoldImporter:
                 CustomUser.objects.filter(pk=user_pk).update(
                     client_id=client_id,
                     user_type=core_choices.UserType.CLIENT,
-                    workspace=None,
+                    workspace=workspace,
                 )
                 self._bump("client_users")
                 continue
@@ -501,9 +520,11 @@ class LegacyRbcoldImporter:
                 full_name=row.get("full_name"),
                 user_type=core_choices.UserType.CLIENT,
                 client_id=client_id,
+                workspace=workspace,
                 is_active=_parse_bool(row.get("is_active", True)),
             )
-            self.id_maps.setdefault("client_users", {})[str(row["id"])] = user.pk
+            self.id_maps.setdefault("client_users", {})[
+                str(row["id"])] = user.pk
             self._bump("client_users")
 
     def _import_client_cavas(self) -> None:
@@ -524,7 +545,8 @@ class LegacyRbcoldImporter:
         legacy_ids = []
         for row in rows:
             client_id = _map_id(self.id_maps, "clients", row.get("client_id"))
-            category_id = category_map.get(str(row.get("category_id"))) if row.get("category_id") else None
+            category_id = category_map.get(
+                str(row.get("category_id"))) if row.get("category_id") else None
             objects.append(
                 Product(
                     client_id=client_id,
@@ -536,9 +558,11 @@ class LegacyRbcoldImporter:
                     uom=row["uom"],
                     kg_uom=_parse_decimal(row.get("kg_uom")),
                     units_in_uom=_parse_int(row.get("units_in_uom"), 0) or 0,
-                    qty_uom_pallet=_parse_int(row.get("qty_uom_pallet"), 0) or 0,
+                    qty_uom_pallet=_parse_int(
+                        row.get("qty_uom_pallet"), 0) or 0,
                     condition=row.get("condition"),
-                    storage_temperature=_parse_decimal(row.get("storage_temperature")) if row.get("storage_temperature") not in (None, "") else None,
+                    storage_temperature=_parse_decimal(row.get("storage_temperature")) if row.get(
+                        "storage_temperature") not in (None, "") else None,
                     category_id=category_id,
                     supplier=row.get("supplier"),
                     comment=row.get("comment") or "",
@@ -557,16 +581,20 @@ class LegacyRbcoldImporter:
         for row in rows:
             objects.append(
                 Entry(
-                    client_id=_map_id(self.id_maps, "clients", row.get("client_id")),
-                    storage_id=_map_id(self.id_maps, "storages", row.get("storage_id")),
+                    client_id=_map_id(self.id_maps, "clients",
+                                      row.get("client_id")),
+                    storage_id=_map_id(
+                        self.id_maps, "storages", row.get("storage_id")),
                     status=row.get("status"),
                     condition=row.get("condition"),
                     in_type=row.get("in_type"),
                     code=row["code"],
                     entry_date=_parse_d(row.get("entry_date")),
-                    total_restibas=_parse_int(row.get("total_restibas"), 0) or 0,
+                    total_restibas=_parse_int(
+                        row.get("total_restibas"), 0) or 0,
                     total_wraps=_parse_int(row.get("total_wraps"), 0) or 0,
-                    total_added_pallets=_parse_int(row.get("total_added_pallets"), 0) or 0,
+                    total_added_pallets=_parse_int(
+                        row.get("total_added_pallets"), 0) or 0,
                     created_at=_parse_dt(row.get("created_at")),
                     updated_at=_parse_dt(row.get("updated_at")),
                 )
@@ -581,8 +609,10 @@ class LegacyRbcoldImporter:
         for row in rows:
             objects.append(
                 EntryProduct(
-                    entry_id=_map_id(self.id_maps, "entries", row.get("entry_id")),
-                    product_id=_map_id(self.id_maps, "products", row.get("product_id")),
+                    entry_id=_map_id(self.id_maps, "entries",
+                                     row.get("entry_id")),
+                    product_id=_map_id(
+                        self.id_maps, "products", row.get("product_id")),
                     quantity=_parse_int(row.get("quantity"), 0) or 0,
                     real_quantity=_parse_int(row.get("real_quantity"), 0) or 0,
                     expiration_date=_parse_d(row.get("expiration_date")),
@@ -604,10 +634,13 @@ class LegacyRbcoldImporter:
             objects.append(
                 Bin(
                     code=row["code"],
-                    client_id=_map_id(self.id_maps, "clients", row.get("client_id")),
+                    client_id=_map_id(self.id_maps, "clients",
+                                      row.get("client_id")),
                     status=row["status"],
-                    entry_id=_map_id(self.id_maps, "entries", row.get("entry_id")),
-                    position_id=_map_id(self.id_maps, "positions", row.get("position_id")),
+                    entry_id=_map_id(self.id_maps, "entries",
+                                     row.get("entry_id")),
+                    position_id=_map_id(
+                        self.id_maps, "positions", row.get("position_id")),
                     zpl_code=row.get("zpl_code"),
                     dispatched_date=_parse_dt(row.get("dispatched_date")),
                     is_processed=_parse_bool(row.get("is_processed")),
@@ -628,7 +661,8 @@ class LegacyRbcoldImporter:
             objects.append(
                 BinProduct(
                     bin_id=_map_id(self.id_maps, "bins", row.get("bin_id")),
-                    entry_product_id=_map_id(self.id_maps, "entry_products", row.get("entry_product_id")),
+                    entry_product_id=_map_id(
+                        self.id_maps, "entry_products", row.get("entry_product_id")),
                     batch=row.get("batch"),
                     expiration_date=_parse_d(row.get("expiration_date")),
                     quantity=_parse_int(row.get("quantity"), 0) or 0,
@@ -647,8 +681,10 @@ class LegacyRbcoldImporter:
         for row in rows:
             objects.append(
                 Exit(
-                    client_id=_map_id(self.id_maps, "clients", row.get("client_id")),
-                    branch_id=_map_id(self.id_maps, "branches", row.get("branch_id")),
+                    client_id=_map_id(self.id_maps, "clients",
+                                      row.get("client_id")),
+                    branch_id=_map_id(self.id_maps, "branches",
+                                      row.get("branch_id")),
                     status=row["status"],
                     exit_date=_parse_d(row.get("exit_date")),
                     code=row["code"],
@@ -668,7 +704,8 @@ class LegacyRbcoldImporter:
             objects.append(
                 ExitProductGroup(
                     exit_id=_map_id(self.id_maps, "exits", row.get("exit_id")),
-                    product_id=_map_id(self.id_maps, "products", row.get("product_id")),
+                    product_id=_map_id(
+                        self.id_maps, "products", row.get("product_id")),
                     quantity=_parse_int(row.get("quantity"), 0) or 0,
                     bin_or_batch=row.get("bin_or_batch"),
                     created_at=_parse_dt(row.get("created_at")),
@@ -676,17 +713,20 @@ class LegacyRbcoldImporter:
                 )
             )
             legacy_ids.append(str(row["id"]))
-        self._bulk_insert(ExitProductGroup, "exit_product_groups", objects, legacy_ids)
+        self._bulk_insert(ExitProductGroup,
+                          "exit_product_groups", objects, legacy_ids)
 
     def _import_exit_products(self) -> None:
         rows = self._load_rows("exit_products")
         objects = []
         legacy_ids = []
         for row in rows:
-            bin_product_id = _map_id(self.id_maps, "bin_products", row.get("bin_entry_product_id"))
+            bin_product_id = _map_id(
+                self.id_maps, "bin_products", row.get("bin_entry_product_id"))
             objects.append(
                 ExitProduct(
-                    exit_product_group_id=_map_id(self.id_maps, "exit_product_groups", row.get("exit_product_group_id")),
+                    exit_product_group_id=_map_id(
+                        self.id_maps, "exit_product_groups", row.get("exit_product_group_id")),
                     bin_product_id=bin_product_id,
                     quantity=_parse_int(row.get("quantity"), 0) or 0,
                     is_picking=_parse_bool(row.get("is_picking")),
@@ -718,11 +758,15 @@ class LegacyRbcoldImporter:
                     new_status=row.get("new_status"),
                     exit_id=_map_id(self.id_maps, "exits", row.get("exit_id")),
                     exit_code=row.get("exit_code"),
-                    is_picking=_parse_bool(row.get("is_picking")) if row.get("is_picking") not in (None, "") else None,
-                    quantity_subtracted=_parse_int(row.get("quantity_subtracted")),
-                    quantity_remaining=_parse_int(row.get("quantity_remaining")),
+                    is_picking=_parse_bool(row.get("is_picking")) if row.get(
+                        "is_picking") not in (None, "") else None,
+                    quantity_subtracted=_parse_int(
+                        row.get("quantity_subtracted")),
+                    quantity_remaining=_parse_int(
+                        row.get("quantity_remaining")),
                     initial_quantity=_parse_int(row.get("initial_quantity")),
-                    position_id=_map_id(self.id_maps, "positions", row.get("position_id")),
+                    position_id=_map_id(
+                        self.id_maps, "positions", row.get("position_id")),
                     notes=row.get("notes"),
                     created_at=_parse_dt(row.get("created_at")),
                     updated_at=_parse_dt(row.get("updated_at")),
@@ -730,7 +774,8 @@ class LegacyRbcoldImporter:
             )
             legacy_ids.append(str(row["id"]))
         if skipped:
-            self.warnings.append(f"bin_movements omitidos (bin legacy sin mapeo): {skipped}")
+            self.warnings.append(
+                f"bin_movements omitidos (bin legacy sin mapeo): {skipped}")
         self._bulk_insert(BinMovement, "bin_movements", objects, legacy_ids)
 
     def _import_exit_movements(self) -> None:
@@ -749,17 +794,20 @@ class LegacyRbcoldImporter:
                     movement_type=row["movement_type"],
                     old_status=row.get("old_status"),
                     new_status=row.get("new_status"),
-                    product_id=_map_id(self.id_maps, "products", row.get("product_id")),
+                    product_id=_map_id(
+                        self.id_maps, "products", row.get("product_id")),
                     product_sku=row.get("product_sku"),
                     product_name=row.get("product_name"),
-                    bin_id=_map_id(self.id_maps, "bins", row.get("bin_entry_id")),
+                    bin_id=_map_id(self.id_maps, "bins",
+                                   row.get("bin_entry_id")),
                     bin_code=row.get("bin_code"),
                     old_bin_code=row.get("old_bin_code"),
                     new_bin_code=row.get("new_bin_code"),
                     quantity=_parse_int(row.get("quantity")),
                     old_quantity=_parse_int(row.get("old_quantity")),
                     new_quantity=_parse_int(row.get("new_quantity")),
-                    is_picking=_parse_bool(row.get("is_picking")) if row.get("is_picking") not in (None, "") else None,
+                    is_picking=_parse_bool(row.get("is_picking")) if row.get(
+                        "is_picking") not in (None, "") else None,
                     notes=row.get("notes"),
                     metadata=_parse_json(row.get("metadata")),
                     created_at=_parse_dt(row.get("created_at")),
@@ -768,7 +816,8 @@ class LegacyRbcoldImporter:
             )
             legacy_ids.append(str(row["id"]))
         if skipped:
-            self.warnings.append(f"exit_movements omitidos (exit legacy sin mapeo): {skipped}")
+            self.warnings.append(
+                f"exit_movements omitidos (exit legacy sin mapeo): {skipped}")
         self._bulk_insert(ExitMovement, "exit_movements", objects, legacy_ids)
 
     def _reset_sequences(self) -> None:
