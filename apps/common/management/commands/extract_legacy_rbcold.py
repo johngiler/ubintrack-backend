@@ -5,8 +5,9 @@ from apps.common.legacy_import.extract import extract_legacy_dump
 
 class Command(BaseCommand):
     help = (
-        "Extrae datos operativos del dump PostgreSQL legacy (formato pg_dump custom) "
-        "a JSON revisable en data/rbcold/import/parsed/."
+        "Extrae datos operativos del dump PostgreSQL legacy (pg_dump custom, PG 17+) "
+        "a JSON en data/rbcold/import/parsed/. "
+        "Ejecutar en la máquina de desarrollo (pg_restore 17+), no en prod con client antiguo."
     )
 
     def add_arguments(self, parser):

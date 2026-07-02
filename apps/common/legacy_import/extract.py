@@ -13,7 +13,7 @@ from apps.common.legacy_import.constants import (
     DEFAULT_PARSED_DIR,
     LEGACY_TABLES,
 )
-from apps.common.legacy_import.pg_copy import extract_table_rows
+from apps.common.legacy_import.pg_copy import check_pg_restore_can_read_dump, extract_table_rows
 
 
 def resolve_dump_path(dump_path: str | None) -> Path:
@@ -42,6 +42,7 @@ def extract_legacy_dump(
 ) -> dict[str, Any]:
     dump = resolve_dump_path(dump_path)
     out_dir = resolve_parsed_dir(parsed_dir)
+    check_pg_restore_can_read_dump(dump)
 
     manifest: dict[str, Any] = {
         "extracted_at": datetime.now(timezone.utc).isoformat(),
@@ -53,6 +54,7 @@ def extract_legacy_dump(
             "No incluye django_migrations, permisos globales ni categorías (usa seed_platform_data).",
             "Incluye historial: inventory_binmovement y order_exitmovement.",
             "Sucursales (branches) incluidas porque las salidas referencian branch_id.",
+            "extract_legacy_rbcold requiere pg_restore 17+ (ejecutar en dev); import_legacy_rbcold corre en prod con JSON parseado.",
         ],
     }
 

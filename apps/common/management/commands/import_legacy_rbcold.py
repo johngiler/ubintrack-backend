@@ -7,7 +7,8 @@ from apps.common.legacy_import.import_rbcold import LegacyRbcoldImporter
 class Command(BaseCommand):
     help = (
         "Importa datos operativos legacy de rbcold desde JSON parseado al workspace multi-tenant. "
-        "Requiere seed_platform_data y ensure_default_workspace --slug rbcold previamente."
+        "Requiere seed_platform_data, ensure_default_workspace --slug rbcold y los JSON de "
+        "extract_legacy_rbcold (generados en dev; no hace falta pg_restore en prod)."
     )
 
     def add_arguments(self, parser):

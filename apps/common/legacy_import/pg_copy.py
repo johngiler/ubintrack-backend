@@ -7,6 +7,39 @@ from typing import Any
 
 COPY_HEADER = re.compile(r"^COPY public\.(\w+) \((.+)\) FROM stdin;$")
 
+_PG_RESTORE_VERSION_HINT = (
+    "El dump fue creado con pg_dump de PostgreSQL 17 (formato custom 1.16). "
+    "Ejecuta extract_legacy_rbcold en tu Mac (pg_restore 17+) y sube solo "
+    "data/rbcold/import/parsed/ al servidor; import_legacy_rbcold sí corre en prod. "
+    "Alternativa: instalar postgresql-client-17 en el servidor."
+)
+
+
+def check_pg_restore_can_read_dump(dump_path: Path) -> None:
+    result = subprocess.run(
+        ["pg_restore", "-l", str(dump_path)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode == 0:
+        return
+    stderr = (result.stderr or "").strip()
+    if "unsupported version" in stderr.lower():
+        version = subprocess.run(
+            ["pg_restore", "--version"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        pg_restore_ver = (version.stdout or version.stderr or "").strip()
+        raise RuntimeError(
+            f"{stderr}\n"
+            f"pg_restore local: {pg_restore_ver or 'desconocido'}\n"
+            f"{_PG_RESTORE_VERSION_HINT}"
+        )
+    raise RuntimeError(f"No se pudo leer el dump: {stderr or result.returncode}")
+
 
 def run_pg_restore_data(dump_path: Path, table_name: str) -> str:
     result = subprocess.run(
@@ -17,6 +50,8 @@ def run_pg_restore_data(dump_path: Path, table_name: str) -> str:
     )
     if result.returncode != 0:
         stderr = (result.stderr or "").strip()
+        if "unsupported version" in stderr.lower():
+            raise RuntimeError(f"{stderr}\n{_PG_RESTORE_VERSION_HINT}")
         raise RuntimeError(
             f"pg_restore falló para la tabla {table_name}: {stderr or result.returncode}"
         )
