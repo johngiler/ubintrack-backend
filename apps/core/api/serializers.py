@@ -428,6 +428,12 @@ class ClientSerializer(serializers.ModelSerializer):
         except Tariff.DoesNotExist as exc:
             raise serializers.ValidationError({"tariff_id": "Tarifa no encontrada."}) from exc
 
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        if self.instance is None and not attrs.get("tariff_id"):
+            raise serializers.ValidationError({"tariff_id": "La tarifa es obligatoria."})
+        return attrs
+
     def create(self, validated_data):
         tariff_id = validated_data.pop("tariff_id", None)
         validated_data["tariff"] = self._resolve_tariff(tariff_id)
