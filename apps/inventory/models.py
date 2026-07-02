@@ -4,9 +4,9 @@ from django.db import models
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db.models import Sum
-from django_currentuser.db.models import CurrentUserField
 from django.utils import timezone
 
+from apps.common.models import BaseModel
 from apps.core import choices
 
 from apps.common.utils.media_layout import wms_bin_tag_upload
@@ -14,25 +14,6 @@ from apps.common.utils.media_layout import wms_bin_tag_upload
 from . import services
 
 logger = logging.getLogger(__name__)
-
-
-class BaseModel(models.Model):
-    is_active = models.BooleanField(default=True, verbose_name='activo')
-    created_at = models.DateTimeField(
-        auto_now_add=True, verbose_name='fecha de creación')
-    updated_at = models.DateTimeField(
-        auto_now=True, verbose_name='fecha de actualización')
-    created_by = CurrentUserField(
-        related_name='%(app_label)s_%(class)s_creates', verbose_name='creado por')
-
-    updated_by = CurrentUserField(
-        related_name='%(app_label)s_%(class)s_updates',
-        on_update=True,
-        verbose_name='actualizado por'
-    )
-
-    class Meta:
-        abstract = True
 
 
 class Category(models.Model):

@@ -3,9 +3,9 @@ from django.db import models
 from django.utils import timezone
 from django.core.exceptions import ValidationError
 from django.db.models import Sum, F
-from django_currentuser.db.models import CurrentUserField
 from django.db import transaction
 
+from apps.common.models import BaseModel
 from apps.core.choices import Conditions, OrderStatus, InTypes, BinStatus
 from apps.common.utils.media_layout import (
     wms_entry_detail_image_upload,
@@ -13,28 +13,6 @@ from apps.common.utils.media_layout import (
     wms_exit_detail_image_upload,
     wms_exit_pdf_upload,
 )
-
-
-class BaseModel(models.Model):
-    created_at = models.DateTimeField(
-        auto_now_add=True, verbose_name='fecha de creación')
-
-    updated_at = models.DateTimeField(
-        auto_now=True, verbose_name='fecha de actualización')
-
-    created_by = CurrentUserField(
-        related_name='%(app_label)s_%(class)s_creates',
-        verbose_name='creado por'
-    )
-
-    updated_by = CurrentUserField(
-        related_name='%(app_label)s_%(class)s_updates',
-        on_update=True,
-        verbose_name='actualizado por'
-    )
-
-    class Meta:
-        abstract = True
 
 
 class Entry(BaseModel):

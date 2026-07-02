@@ -7,7 +7,7 @@ Tenant lógico del SaaS WMS: un owner (empresa operadora) con aislamiento de dat
 
 from django.db import models
 
-from apps.common.models import TimeStampedActiveModel
+from apps.common.models import BaseModel
 from apps.common.utils.media_layout import (
     workspace_brand_favicon_upload,
     workspace_brand_logo_mark_upload,
@@ -19,7 +19,7 @@ from apps.workspaces.utils.validators import (
 )
 
 
-class Workspace(TimeStampedActiveModel):
+class Workspace(BaseModel):
     slug = models.SlugField(
         max_length=64,
         unique=True,

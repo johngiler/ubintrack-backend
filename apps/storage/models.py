@@ -1,31 +1,12 @@
 from django.db import models
 from django.core.files import File
-from django_currentuser.db.models import CurrentUserField
 
+from apps.common.models import BaseModel
 from apps.core import choices
 
 from apps.common.utils.media_layout import wms_position_qr_upload
 
 from . import services
-
-
-class BaseModel(models.Model):
-    is_active = models.BooleanField(default=True, verbose_name='activo')
-    created_at = models.DateTimeField(
-        auto_now_add=True, verbose_name='fecha de creación')
-    updated_at = models.DateTimeField(
-        auto_now=True, verbose_name='fecha de actualización')
-    created_by = CurrentUserField(
-        related_name='%(app_label)s_%(class)s_creates', verbose_name='creado por')
-
-    updated_by = CurrentUserField(
-        related_name='%(app_label)s_%(class)s_updates',
-        on_update=True,
-        verbose_name='actualizado por'
-    )
-
-    class Meta:
-        abstract = True
 
 
 class Storage(BaseModel):

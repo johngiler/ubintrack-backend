@@ -1,30 +1,11 @@
 from django.db import models
-from django_currentuser.db.models import CurrentUserField
 from django.contrib.auth.models import AbstractUser, Permission
 
+from apps.common.models import BaseModel
 from apps.finance.models import Tariff
 
 from . import choices
 from . import services
-
-
-class BaseModel(models.Model):
-    is_active = models.BooleanField(default=True, verbose_name='activo')
-    created_at = models.DateTimeField(
-        auto_now_add=True, verbose_name='fecha de creación')
-    updated_at = models.DateTimeField(
-        auto_now=True, verbose_name='fecha de actualización')
-    created_by = CurrentUserField(
-        related_name='%(app_label)s_%(class)s_creates', verbose_name='creado por')
-
-    updated_by = CurrentUserField(
-        related_name='%(app_label)s_%(class)s_updates',
-        on_update=True,
-        verbose_name='actualizado por'
-    )
-
-    class Meta:
-        abstract = True
 
 
 class Profile(BaseModel):
