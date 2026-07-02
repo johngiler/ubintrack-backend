@@ -11,27 +11,14 @@ if [[ ! -f "$ENV_FILE" ]]; then
   exit 1
 fi
 
-# Solo POSTGRES_* — no hacer source del .env completo (DJANGO_SECRET_KEY tiene
-# caracteres que bash interpreta: $, (, ), &, etc.).
-load_postgres_env() {
-  local key="$1"
-  local line value
-  line="$(grep -E "^${key}=" "$ENV_FILE" | grep -v '^#' | tail -n1 || true)"
-  if [[ -z "$line" ]]; then
-    return 1
-  fi
-  value="${line#*=}"
-  if [[ "$value" =~ ^\'.*\'$ ]]; then
-    value="${value:1:-1}"
-  elif [[ "$value" =~ ^\".*\"$ ]]; then
-    value="${value:1:-1}"
-  fi
-  printf -v "$key" '%s' "$value"
-  export "$key"
-}
+# Valores con $, (, ), &, etc. deben ir entre comillas simples en .env.
+set -a
+# shellcheck source=/dev/null
+source "$ENV_FILE"
+set +a
 
 for v in POSTGRES_USER POSTGRES_PASSWORD POSTGRES_DB; do
-  if ! load_postgres_env "$v"; then
+  if [[ -z "${!v}" ]]; then
     echo "ERROR: $v not set in .env" >&2
     exit 1
   fi
