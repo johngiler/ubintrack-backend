@@ -3,6 +3,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.exceptions import NotFound, ValidationError
+from apps.common.pagination import StandardPagination
 from apps.common.utils.permissions_mixins import (
     StrictDjangoModelPermissions,
     DenyClientUsers,
@@ -49,6 +50,7 @@ class BillingCalculationViewSet(viewsets.ViewSet):
     - Daily inventory average (integrated from averages)
     """
     permission_classes = [IsAuthenticated, DenyClientUsers]
+    pagination_class = StandardPagination
 
     def _require_workspace(self, request):
         ws = get_workspace_for_request(request)
