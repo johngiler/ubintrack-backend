@@ -53,6 +53,7 @@ urlpatterns = [
     path("api/dashboard/stats/", dashboard_views.DashboardStatsView.as_view(), name="dashboard-stats"),
     path("api/warehouse/structure/", dashboard_views.WarehouseStructureView.as_view(), name="warehouse-structure"),
     path("api/dashboard/client-stats/", dashboard_views.ClientStatsView.as_view(), name="client-stats"),
+    path("api/nav/counts/", dashboard_views.NavCountsView.as_view(), name="nav-counts"),
     path("api/", include(router.urls)),
 ]
 

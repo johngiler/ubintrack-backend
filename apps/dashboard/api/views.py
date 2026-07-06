@@ -6,6 +6,7 @@ from rest_framework.views import APIView
 
 from apps.core.utils.user_roles import can_manage_as_administrator, is_client_user
 from apps.dashboard import services as dashboard_services
+from apps.dashboard.nav_counts import build_nav_counts
 from apps.workspaces.utils.tenant import get_workspace_for_request, is_platform_staff
 
 
@@ -71,3 +72,12 @@ class ClientStatsView(APIView):
         workspace = get_workspace_for_request(request)
         data = dashboard_services.build_client_stats(workspace)
         return Response({'success': True, 'data': data}, status=status.HTTP_200_OK)
+
+
+class NavCountsView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        if get_workspace_for_request(request) is None:
+            return Response({'counts': {}}, status=status.HTTP_200_OK)
+        return Response({'counts': build_nav_counts(request)}, status=status.HTTP_200_OK)
