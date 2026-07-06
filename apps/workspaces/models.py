@@ -20,6 +20,12 @@ from apps.workspaces.utils.validators import (
 
 
 class Workspace(BaseModel):
+    class SidebarLogoGradientMode(models.TextChoices):
+        NONE = "none", "Desactivado"
+        LIGHT = "light", "Solo modo claro"
+        DARK = "dark", "Solo modo oscuro"
+        BOTH = "both", "Ambos modos"
+
     slug = models.SlugField(
         max_length=64,
         unique=True,
@@ -71,6 +77,13 @@ class Workspace(BaseModel):
         "Eslogan",
         max_length=255,
         blank=True,
+    )
+    sidebar_logo_gradient_mode = models.CharField(
+        "Fondo gradiente en logo del sidebar",
+        max_length=8,
+        choices=SidebarLogoGradientMode.choices,
+        default=SidebarLogoGradientMode.NONE,
+        help_text="Aplica un fondo con los colores de marca detrás del logo en el menú lateral.",
     )
     invoice_prefix = models.CharField(
         "Prefijo de factura",
