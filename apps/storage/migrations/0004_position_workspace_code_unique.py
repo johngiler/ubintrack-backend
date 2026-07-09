@@ -37,6 +37,8 @@ def populate_position_workspace(apps, schema_editor):
 
 class Migration(migrations.Migration):
 
+    atomic = False
+
     dependencies = [
         ("workspaces", "0001_initial"),
         ("storage", "0003_position_code_unique_per_cava"),
