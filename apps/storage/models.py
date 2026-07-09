@@ -63,7 +63,10 @@ class Cava(BaseModel):
 class Position(BaseModel):
     PLACE_CHOICES = [
         ('A', 'A - Adelante'),
-        ('B', 'B - Atrás'),
+        ('B', 'B - Profundidad 2'),
+        ('C', 'C - Profundidad 3'),
+        ('D', 'D - Profundidad 4'),
+        ('E', 'E - Atrás'),
     ]
 
     RACK_CHOICES = services.generate_rack_list(17)

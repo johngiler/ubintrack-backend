@@ -4,11 +4,19 @@ from apps.core.choices import PositionStatus
 from apps.storage.models import Cava, Position
 from apps.workspaces.models import Workspace
 
+DEPTH_TO_PLACES = {
+    1: ["A"],
+    2: ["A", "B"],
+    3: ["A", "B", "C"],
+    4: ["A", "B", "C", "D"],
+    5: ["A", "B", "C", "D", "E"],
+}
+
 
 class Command(BaseCommand):
     help = (
-        "Genera posiciones en masa para una cava existente a partir de "
-        "pasillos, racks, niveles y profundidades (A/B)."
+        "Genera posiciones en masa para una cava existente. "
+        "Una pasada por pasillo (o varios con --halls A,B,C)."
     )
 
     def add_arguments(self, parser):
@@ -16,19 +24,19 @@ class Command(BaseCommand):
             "--cava",
             type=str,
             required=True,
-            help='Nombre exacto de la cava (debe existir en la BD), p. ej. "Cava 1"',
+            help='Nombre exacto de la cava, p. ej. "Cava 5"',
         )
         parser.add_argument(
             "--halls",
             type=str,
             required=True,
-            help="Pasillos separados por coma, p. ej. A,B,C,D",
+            help="Pasillo(s) separados por coma, p. ej. B o A,B,C,D",
         )
         parser.add_argument(
             "--racks",
             type=int,
             required=True,
-            help="Cantidad de racks por pasillo (1..N)",
+            help="Cantidad de racks (1..N)",
         )
         parser.add_argument(
             "--levels",
@@ -37,16 +45,17 @@ class Command(BaseCommand):
             help="Cantidad de niveles por rack (1..N)",
         )
         parser.add_argument(
-            "--places",
-            type=str,
-            default="A,B",
-            help="Profundidades separadas por coma (A=adelante, B=atrás). Default: A,B",
+            "--profundidad",
+            type=int,
+            default=2,
+            choices=sorted(DEPTH_TO_PLACES),
+            help="Profundidades del rack (default: 2 = A,B; 5 = A..E)",
         )
         parser.add_argument(
             "--workspace-slug",
             type=str,
-            default=None,
-            help="Slug del workspace (opcional, útil si hay cavas homónimas)",
+            required=True,
+            help="Slug del workspace (owner)",
         )
         parser.add_argument(
             "--status",
@@ -64,9 +73,9 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         cava_name = options["cava"].strip()
         halls = self._parse_letters(options["halls"], "pasillos")
-        places = self._parse_letters(options["places"], "profundidades")
         racks = options["racks"]
         levels = options["levels"]
+        places = DEPTH_TO_PLACES[options["profundidad"]]
         status = options["status"]
         dry_run = options["dry_run"]
 
@@ -74,14 +83,6 @@ class Command(BaseCommand):
             raise CommandError("--racks debe ser >= 1")
         if levels < 1:
             raise CommandError("--levels debe ser >= 1")
-
-        valid_places = {choice[0] for choice in Position.PLACE_CHOICES}
-        invalid_places = set(places) - valid_places
-        if invalid_places:
-            raise CommandError(
-                f"Profundidades inválidas: {', '.join(sorted(invalid_places))}. "
-                f"Valores permitidos: {', '.join(sorted(valid_places))}"
-            )
 
         valid_halls = {choice[0] for choice in Position.HALL_CHOICES}
         invalid_halls = set(halls) - valid_halls
@@ -91,7 +92,7 @@ class Command(BaseCommand):
                 f"Valores permitidos: {', '.join(sorted(valid_halls))}"
             )
 
-        cava = self._resolve_cava(cava_name, options.get("workspace_slug"))
+        cava = self._resolve_cava(cava_name, options["workspace_slug"])
         total_expected = len(halls) * racks * levels * len(places)
 
         self.stdout.write(
@@ -99,7 +100,8 @@ class Command(BaseCommand):
         )
         self.stdout.write(
             f"Configuración: pasillos={','.join(halls)}, racks=1..{racks}, "
-            f"niveles=1..{levels}, profundidades={','.join(places)}"
+            f"niveles=1..{levels}, profundidad={options['profundidad']} "
+            f"({','.join(places)})"
         )
         self.stdout.write(f"Posiciones a evaluar: {total_expected}")
 
@@ -169,28 +171,22 @@ class Command(BaseCommand):
             raise CommandError(f"Hay valores duplicados en {label}: {raw}")
         return values
 
-    def _resolve_cava(self, name: str, workspace_slug: str | None) -> Cava:
-        qs = Cava.objects.filter(name=name, is_active=True).select_related("storage")
+    def _resolve_cava(self, name: str, workspace_slug: str) -> Cava:
+        ws = Workspace.objects.filter(slug=workspace_slug.strip().lower()).first()
+        if not ws:
+            raise CommandError(f'No existe workspace con slug "{workspace_slug}"')
 
-        if workspace_slug:
-            ws = Workspace.objects.filter(slug=workspace_slug.strip().lower()).first()
-            if not ws:
-                raise CommandError(f'No existe workspace con slug "{workspace_slug}"')
-            qs = qs.filter(storage__workspace=ws)
+        qs = Cava.objects.filter(
+            name=name,
+            is_active=True,
+            storage__workspace=ws,
+        ).select_related("storage")
 
-        count = qs.count()
-        if count == 0:
-            hint = (
-                f' (workspace="{workspace_slug}")' if workspace_slug else ""
-            )
+        cava = qs.first()
+        if not cava:
             raise CommandError(
-                f'No se encontró cava activa con nombre "{name}"{hint}. '
+                f'No se encontró cava activa "{name}" en workspace "{workspace_slug}". '
                 "Créala primero en la BD."
             )
-        if count > 1:
-            raise CommandError(
-                f'Hay {count} cavas activas con nombre "{name}". '
-                "Usa --workspace-slug para desambiguar."
-            )
 
-        return qs.first()
+        return cava
