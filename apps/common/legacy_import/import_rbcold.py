@@ -217,7 +217,7 @@ class LegacyRbcoldImporter:
             self._import_tariffs(workspace)
             self._import_storages(workspace)
             self._import_cavas()
-            self._import_positions()
+            self._import_positions(workspace)
             self._import_clients(workspace)
             self._import_branches()
             self._import_profiles(workspace)
@@ -341,7 +341,7 @@ class LegacyRbcoldImporter:
             legacy_ids.append(str(row["id"]))
         self._bulk_insert(Cava, "cavas", objects, legacy_ids)
 
-    def _import_positions(self) -> None:
+    def _import_positions(self, workspace: Workspace) -> None:
         rows = self._load_rows("positions")
         objects = []
         legacy_ids = []
@@ -350,6 +350,7 @@ class LegacyRbcoldImporter:
             objects.append(
                 Position(
                     cava_id=cava_id,
+                    workspace=workspace,
                     is_active=_parse_bool(row.get("is_active", True)),
                     status=row["status"],
                     level=_parse_int(row.get("level"), 1) or 1,

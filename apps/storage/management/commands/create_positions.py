@@ -28,13 +28,6 @@ class Command(BaseCommand):
         for code in position_codes:
             code = code.strip()
 
-            # Verificar si la posición ya existe
-            if Position.objects.filter(code=code).exists():
-                self.stdout.write(self.style.WARNING(
-                    f'La posición {code} ya existe. Omitiendo.'))
-                skipped_count += 1
-                continue
-
             # Validar formato del código
             match = re.match(pattern, code)
             if not match:
@@ -60,6 +53,15 @@ class Command(BaseCommand):
                 if not cava:
                     self.stdout.write(self.style.ERROR(
                         f'No se encontró cava para el código: {cava_code}'))
+                    skipped_count += 1
+                    continue
+
+                if Position.objects.filter(
+                    workspace=cava.storage.workspace, code=code
+                ).exists():
+                    self.stdout.write(self.style.WARNING(
+                        f'La posición {code} ya existe en el workspace '
+                        f'{cava.storage.workspace.slug}. Omitiendo.'))
                     skipped_count += 1
                     continue
 

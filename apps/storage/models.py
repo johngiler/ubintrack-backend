@@ -90,9 +90,14 @@ class Position(BaseModel):
         max_length=1, choices=HALL_CHOICES, verbose_name='pasillo')
     cava = models.ForeignKey(Cava, on_delete=models.CASCADE,
                              null=True, related_name="positions", verbose_name='cava')
+    workspace = models.ForeignKey(
+        "workspaces.Workspace",
+        on_delete=models.CASCADE,
+        related_name="positions",
+        verbose_name="workspace",
+    )
     is_picking = models.BooleanField(default=False, verbose_name='es picking?')
-    code = models.CharField(max_length=100, unique=True,
-                            editable=False, verbose_name='código')
+    code = models.CharField(max_length=100, editable=False, verbose_name='código')
 
     qr_code_image = models.ImageField(
         upload_to=wms_position_qr_upload,
@@ -107,8 +112,27 @@ class Position(BaseModel):
     class Meta:
         verbose_name = 'posición'
         verbose_name_plural = 'posiciones'
+        constraints = [
+            models.UniqueConstraint(
+                fields=['cava', 'hall', 'rack', 'level', 'place'],
+                name='unique_position_slot_per_cava',
+            ),
+            models.UniqueConstraint(
+                fields=['workspace', 'code'],
+                name='unique_position_code_per_workspace',
+            ),
+        ]
 
     def save(self, *args, **kwargs):
+        if self.cava_id and not self.workspace_id:
+            ws_id = (
+                Cava.objects.filter(pk=self.cava_id)
+                .values_list("storage__workspace_id", flat=True)
+                .first()
+            )
+            if ws_id:
+                self.workspace_id = ws_id
+
         if not self.code:
             cava_code = services.cava_code_prefix(self.cava.name if self.cava else "")
             hall_code = f"P{self.hall}"
