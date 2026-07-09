@@ -1,28 +1,41 @@
 from django.db import migrations, models
-from django.db.models import Count, Min
 
 
 def dedupe_position_slots(apps, schema_editor):
-    Position = apps.get_model("storage", "Position")
-
-    duplicate_groups = (
-        Position.objects.values("cava_id", "hall", "rack", "level", "place")
-        .annotate(n=Count("id"), keep_id=Min("id"))
-        .filter(n__gt=1)
-    )
-
-    for group in duplicate_groups:
-        (
-            Position.objects.filter(
-                cava_id=group["cava_id"],
-                hall=group["hall"],
-                rack=group["rack"],
-                level=group["level"],
-                place=group["place"],
-            )
-            .exclude(id=group["keep_id"])
-            .delete()
+    # SQL directo: evita señales post_delete que en PostgreSQL dejan
+    # "pending trigger events" y bloquean ALTER TABLE en la misma migración.
+    schema_editor.execute(
+        """
+        DELETE FROM storage_position p
+        WHERE p.id IN (
+            SELECT p2.id
+            FROM storage_position p2
+            INNER JOIN (
+                SELECT cava_id, hall, rack, level, place, MIN(id) AS keep_id
+                FROM storage_position
+                GROUP BY cava_id, hall, rack, level, place
+                HAVING COUNT(*) > 1
+            ) d ON p2.cava_id = d.cava_id
+                AND p2.hall = d.hall
+                AND p2.rack = d.rack
+                AND p2.level = d.level
+                AND p2.place = d.place
+                AND p2.id <> d.keep_id
         )
+        """
+    )
+    schema_editor.execute(
+        """
+        UPDATE storage_cava c
+        SET total_levels = sub.cnt
+        FROM (
+            SELECT cava_id, COUNT(*) AS cnt
+            FROM storage_position
+            GROUP BY cava_id
+        ) sub
+        WHERE c.id = sub.cava_id
+        """
+    )
 
 
 class Migration(migrations.Migration):
@@ -32,7 +45,11 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
-        migrations.RunPython(dedupe_position_slots, migrations.RunPython.noop),
+        migrations.RunPython(
+            dedupe_position_slots,
+            migrations.RunPython.noop,
+            atomic=False,
+        ),
         migrations.AlterField(
             model_name="position",
             name="code",

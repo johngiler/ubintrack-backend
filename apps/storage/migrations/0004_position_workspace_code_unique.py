@@ -3,6 +3,20 @@ import django.db.models.deletion
 
 
 def populate_position_workspace(apps, schema_editor):
+    connection = schema_editor.connection
+    if connection.vendor == "postgresql":
+        schema_editor.execute(
+            """
+            UPDATE storage_position p
+            SET workspace_id = s.workspace_id
+            FROM storage_cava c
+            INNER JOIN storage_storage s ON s.id = c.storage_id
+            WHERE p.cava_id = c.id
+              AND p.workspace_id IS NULL
+            """
+        )
+        return
+
     Position = apps.get_model("storage", "Position")
     Cava = apps.get_model("storage", "Cava")
 
@@ -40,7 +54,11 @@ class Migration(migrations.Migration):
                 verbose_name="workspace",
             ),
         ),
-        migrations.RunPython(populate_position_workspace, migrations.RunPython.noop),
+        migrations.RunPython(
+            populate_position_workspace,
+            migrations.RunPython.noop,
+            atomic=False,
+        ),
         migrations.RemoveConstraint(
             model_name="position",
             name="unique_position_code_per_cava",
