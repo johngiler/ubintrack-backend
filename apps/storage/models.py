@@ -76,6 +76,8 @@ class Position(BaseModel):
         ('B', 'Pasillo B'),
         ('C', 'Pasillo C'),
         ('D', 'Pasillo D'),
+        ('E', 'Pasillo E'),
+        ('F', 'Pasillo F'),
     ]
 
     status = models.CharField(
