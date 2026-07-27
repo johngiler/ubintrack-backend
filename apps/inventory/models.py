@@ -104,8 +104,15 @@ class Product(BaseModel):
 
 
 class Bin(BaseModel):
-    code = models.CharField(max_length=50, unique=True,
-                            editable=False, verbose_name='código de bin')
+    code = models.CharField(
+        max_length=50, editable=False, verbose_name='código de bin')
+
+    workspace = models.ForeignKey(
+        "workspaces.Workspace",
+        on_delete=models.CASCADE,
+        related_name="bins",
+        verbose_name="workspace",
+    )
 
     client = models.ForeignKey(
         'core.Client',
@@ -160,6 +167,12 @@ class Bin(BaseModel):
     class Meta:
         verbose_name = 'bin'
         verbose_name_plural = 'bins'
+        constraints = [
+            models.UniqueConstraint(
+                fields=['workspace', 'code'],
+                name='unique_bin_code_per_workspace',
+            ),
+        ]
 
     def save(self, *args, **kwargs):
         is_new = self._state.adding
@@ -175,8 +188,28 @@ class Bin(BaseModel):
         if not self.client and self.entry:
             self.client = self.entry.client
 
+        if not self.workspace_id:
+            if self.client_id:
+                from apps.core.models import Client
+                ws_id = (
+                    Client.objects.filter(pk=self.client_id)
+                    .values_list("workspace_id", flat=True)
+                    .first()
+                )
+                if ws_id:
+                    self.workspace_id = ws_id
+            elif self.entry_id:
+                from apps.order.models import Entry
+                ws_id = (
+                    Entry.objects.filter(pk=self.entry_id)
+                    .values_list("client__workspace_id", flat=True)
+                    .first()
+                )
+                if ws_id:
+                    self.workspace_id = ws_id
+
         if not self.code:
-            self.code = self.generate_global_bin_code()
+            self.code = self.generate_bin_code(self.workspace_id)
 
         if self.status == choices.BinStatus.DESPACHADO and not self.dispatched_date:
             self.dispatched_date = timezone.now()
@@ -205,11 +238,23 @@ class Bin(BaseModel):
                 logger.error(f"Error generando tag o ZPL: {str(e)}")
 
     @staticmethod
-    def generate_global_bin_code():
-        last_bin = Bin.objects.order_by('id').last()
-        last_number = int(last_bin.code.split(
-            '-')[-1]) if last_bin and last_bin.code else 0
+    def generate_bin_code(workspace_id=None):
+        qs = Bin.objects.all()
+        if workspace_id:
+            qs = qs.filter(workspace_id=workspace_id)
+        last_bin = qs.order_by('id').last()
+        last_number = 0
+        if last_bin and last_bin.code:
+            try:
+                last_number = int(last_bin.code.split('-')[-1])
+            except (TypeError, ValueError):
+                last_number = 0
         return f"BIN-{last_number + 1:010d}"
+
+    @staticmethod
+    def generate_global_bin_code():
+        """Compat: secuencia global (preferir generate_bin_code(workspace_id))."""
+        return Bin.generate_bin_code()
 
     def generate_tag(self):
         if self.position and self.bin_products.exists():

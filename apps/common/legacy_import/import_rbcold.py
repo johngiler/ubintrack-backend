@@ -227,7 +227,7 @@ class LegacyRbcoldImporter:
             self._import_products(category_map)
             self._import_entries()
             self._import_entry_products()
-            self._import_bins()
+            self._import_bins(workspace)
             self._import_bin_products()
             self._import_exits()
             self._import_exit_product_groups()
@@ -627,7 +627,7 @@ class LegacyRbcoldImporter:
             legacy_ids.append(str(row["id"]))
         self._bulk_insert(EntryProduct, "entry_products", objects, legacy_ids)
 
-    def _import_bins(self) -> None:
+    def _import_bins(self, workspace: Workspace) -> None:
         rows = self._load_rows("bins")
         objects = []
         legacy_ids = []
@@ -635,6 +635,7 @@ class LegacyRbcoldImporter:
             objects.append(
                 Bin(
                     code=row["code"],
+                    workspace=workspace,
                     client_id=_map_id(self.id_maps, "clients",
                                       row.get("client_id")),
                     status=row["status"],

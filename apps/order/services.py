@@ -661,7 +661,10 @@ def replace_exit_product_bin(exit_product_id, new_bin_code, user=None):
         # 2. Buscar el nuevo bin por código
         try:
             new_bin = Bin.objects.select_related(
-                'client', 'position').get(code=new_bin_code)
+                'client', 'position').get(
+                code=new_bin_code,
+                workspace_id=expected_client.workspace_id,
+            )
         except Bin.DoesNotExist:
             raise ValidationError(
                 f'Bin con código "{new_bin_code}" no encontrado.')

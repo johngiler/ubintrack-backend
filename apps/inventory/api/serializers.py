@@ -297,6 +297,7 @@ class BinSerializer(serializers.ModelSerializer):
     class Meta:
         model = inventory_models.Bin
         exclude = ('created_by', 'updated_by',)
+        read_only_fields = ('workspace', 'code', 'created_at', 'updated_at')
 
     def get_related_exits(self, obj):
         """Obtiene las órdenes de salida relacionadas a este bin"""
