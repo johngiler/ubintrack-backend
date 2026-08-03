@@ -116,6 +116,9 @@ echo "[restore_db] CREATE DATABASE $POSTGRES_DB..."
 createdb --owner="$POSTGRES_USER" "$POSTGRES_DB"
 
 echo "[restore_db] Importando SQL..."
-psql -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -f "$SQL_FILE" >/dev/null
+# pg_dump reciente (p. ej. Ubuntu 16.14+) inserta \restrict / \unrestrict;
+# algunos clientes psql no los reconocen → se omiten al importar.
+grep -vE '^\\(un)?restrict( |$)' "$SQL_FILE" \
+  | psql -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 >/dev/null
 
 echo "[restore_db] OK — base restaurada."
