@@ -74,6 +74,10 @@ def _validate_bins_common(bins: list[Bin], workspace_id: int) -> None:
             raise ValidationError(
                 f"El bin {bin_obj.code} no tiene producto/lote."
             )
+        if bin_obj.position_id:
+            raise ValidationError(
+                f"El bin {bin_obj.code} ya tiene posición."
+            )
 
 
 def _halls_with_product(workspace_id: int, key: ProductBatchKey) -> set[tuple]:
