@@ -54,7 +54,7 @@ class PositionViewSet(WorkspaceScopeMixin, viewsets.ModelViewSet):
     serializer_class = serializers.PositionSerializer
     pagination_class = MediumPagination
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
-    filterset_fields = ['status', 'hall', 'cava', 'is_active']
+    filterset_fields = ['status', 'hall', 'cava', 'is_active', 'is_picking', 'is_push']
     search_fields = ['code',]
     permission_classes = [IsAuthenticated, StrictDjangoModelPermissions]
     workspace_field = "cava__storage__workspace"

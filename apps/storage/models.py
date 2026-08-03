@@ -103,6 +103,11 @@ class Position(BaseModel):
         verbose_name="workspace",
     )
     is_picking = models.BooleanField(default=False, verbose_name='es picking?')
+    is_push = models.BooleanField(
+        default=False,
+        verbose_name='es push?',
+        help_text='Marca el conducto (cava+pasillo+rack+nivel) como almacenamiento push-back.',
+    )
     code = models.CharField(max_length=100, editable=False, verbose_name='código')
 
     qr_code_image = models.ImageField(

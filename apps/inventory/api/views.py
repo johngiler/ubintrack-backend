@@ -241,83 +241,100 @@ class BinViewSet(ClientScopeMixin, viewsets.ModelViewSet):
 
         return response
 
+    @action(detail=False, methods=['get'], url_path='criterios-almacenamiento')
+    def criterios_almacenamiento(self, request):
+        """Lista los criterios de almacenamiento disponibles."""
+        from apps.inventory.mass_store import list_storage_criteria
+
+        return Response(list_storage_criteria())
+
     @action(detail=False, methods=['post'], url_path='almacenar-masivo')
     @transaction.atomic
     def almacenar_masivo(self, request):
         """
-        Almacena masivamente todos los bins en EN_RECIBO que tengan posición asignada.
-        Solo disponible para administradores.
-        Registra movimiento de historial para cada bin.
+        Almacenamiento masivo por criterios de almacenamiento: validar → sugerir → aplicar.
+        Body: { strategy: "push"|"compact_sku_batch", bin_ids: [1,2,...], confirm?: bool, assignments?: [...] }
+        - confirm=false o ausente: solo sugiere (preview)
+        - confirm=true: aplica sugerencia o assignments del preview
         """
+        from django.core.exceptions import ValidationError as DjangoValidationError
+        from apps.inventory.mass_store import apply_mass_store, suggest_mass_store
+        from apps.workspaces.utils.tenant import get_workspace_for_request
+
         user = request.user
-
-        # Solo admin puede usar esta función
         if not can_manage_as_administrator(user):
-            return Response({
-                'success': False,
-                'message': 'Solo administradores pueden almacenar bins masivamente'
-            }, status=status.HTTP_403_FORBIDDEN)
-
-        # Obtener bins en EN_RECIBO con posición asignada
-        bins_to_update = inventory_models.Bin.objects.filter(
-            status=choices.BinStatus.EN_RECIBO,
-            position__isnull=False,
-            is_active=True
-        ).select_related('position').prefetch_related('bin_products')
-
-        # Filtrar por cliente si el usuario es cliente
-        if is_client_user(user):
-            bins_to_update = bins_to_update.filter(
-                client=get_user_client(user))
-
-        # Obtener lista de bins para crear movimientos
-        bins_list = list(bins_to_update)
-        total_bins = len(bins_list)
-
-        if total_bins == 0:
-            return Response({
-                'success': True,
-                'message': 'No hay bins en recibo con posición asignada para almacenar',
-                'updated': 0
-            })
-
-        # Crear movimientos de historial para cada bin
-        movements_to_create = []
-        for bin in bins_list:
-            # Calcular cantidad inicial del bin
-            initial_qty = sum(
-                bep.quantity or 0 for bep in bin.bin_products.all()
+            return Response(
+                {'success': False, 'message': 'No autorizado.'},
+                status=status.HTTP_403_FORBIDDEN,
             )
-            movements_to_create.append(
-                inventory_models.BinMovement(
-                    bin=bin,
-                    movement_type=inventory_models.BinMovementType.STATUS_CHANGED,
-                    old_status=choices.BinStatus.EN_RECIBO,
-                    new_status=choices.BinStatus.ALMACENADO,
-                    position=bin.position,
-                    initial_quantity=initial_qty,
-                    notes=f'Almacenado masivamente por {user.get_full_name() or user.username}.',
-                    created_by=user,
-                    updated_by=user,
+
+        ws = get_workspace_for_request(request)
+        if ws is None:
+            return Response(
+                {'success': False, 'message': 'No se pudo completar la operación.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        strategy = (request.data.get('strategy') or 'push').strip()
+        bin_ids = request.data.get('bin_ids') or []
+        confirm = bool(request.data.get('confirm'))
+        assignments = request.data.get('assignments')
+        params = request.data.get('params') or {}
+
+        if not isinstance(bin_ids, list) or not bin_ids:
+            return Response(
+                {'success': False, 'message': 'Seleccione al menos un bin.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            bin_ids = [int(x) for x in bin_ids]
+        except (TypeError, ValueError):
+            return Response(
+                {'success': False, 'message': 'bin_ids inválidos.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            if not confirm:
+                planned = suggest_mass_store(
+                    bin_ids=bin_ids,
+                    workspace_id=ws.id,
+                    strategy=strategy,
+                    params=params,
                 )
+                return Response({
+                    'success': True,
+                    'preview': True,
+                    'strategy': strategy,
+                    'assignments': [
+                        {
+                            'bin_id': a.bin_id,
+                            'position_id': a.position_id,
+                            'bin_code': a.bin_code,
+                            'position_code': a.position_code,
+                            'conduit_key': a.conduit_key,
+                        }
+                        for a in planned
+                    ],
+                    'message': f'{len(planned)} posiciones sugeridas.',
+                })
+
+            result = apply_mass_store(
+                bin_ids=bin_ids,
+                workspace_id=ws.id,
+                strategy=strategy,
+                params=params,
+                user=user,
+                assignments=assignments,
             )
-
-        # Actualizar todos los bins
-        updated = inventory_models.Bin.objects.filter(
-            id__in=[b.id for b in bins_list]
-        ).update(
-            status=choices.BinStatus.ALMACENADO,
-            updated_by=user
-        )
-
-        # Guardar movimientos
-        inventory_models.BinMovement.objects.bulk_create(movements_to_create)
-
-        return Response({
-            'success': True,
-            'message': f'{updated} bins almacenados exitosamente',
-            'updated': updated
-        })
+            return Response(result)
+        except DjangoValidationError as exc:
+            messages = getattr(exc, 'messages', None) or [str(exc)]
+            return Response(
+                {'success': False, 'message': messages[0] if messages else 'No se pudo completar la operación.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
     @action(detail=True, methods=['post'])
     def print(self, request, pk=None):

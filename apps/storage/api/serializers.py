@@ -68,3 +68,33 @@ class PositionSerializer(serializers.ModelSerializer):
     class Meta:
         model = storage_models.Position
         exclude = ('created_by', 'updated_by')
+
+    def _sync_conduit_is_push(self, position, is_push: bool):
+        from django.core.exceptions import ValidationError as DjangoValidationError
+
+        from apps.storage.utils.conduits import set_conduit_is_push
+
+        try:
+            set_conduit_is_push(position, is_push)
+        except DjangoValidationError as exc:
+            msg = "; ".join(exc.messages) if hasattr(exc, "messages") else str(exc)
+            raise serializers.ValidationError({"is_push": msg}) from exc
+
+    def create(self, validated_data):
+        # No marcar push en la fila hasta validar profundidad del conducto.
+        is_push = validated_data.pop("is_push", False)
+        validated_data["is_push"] = False
+        position = super().create(validated_data)
+        if is_push:
+            self._sync_conduit_is_push(position, True)
+            position.is_push = True
+        return position
+
+    def update(self, instance, validated_data):
+        sync_push = "is_push" in validated_data
+        is_push = validated_data.pop("is_push") if sync_push else None
+        position = super().update(instance, validated_data)
+        if sync_push:
+            self._sync_conduit_is_push(position, is_push)
+            position.is_push = is_push
+        return position

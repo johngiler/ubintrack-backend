@@ -322,33 +322,73 @@ class BinSerializer(serializers.ModelSerializer):
     def validate_position_id(self, position):
         if self.instance:
             current_position = self.instance.position
-            if position and position.status != choices.PositionStatus.LIBRE and position.code != current_position.code:
+            if position and position.status != choices.PositionStatus.LIBRE and (
+                not current_position or position.code != current_position.code
+            ):
                 raise serializers.ValidationError(
                     f"La posición {position.code} no está libre. Estado actual: {position.status}"
                 )
+        elif position and position.status != choices.PositionStatus.LIBRE:
+            raise serializers.ValidationError(
+                f"La posición {position.code} no está libre. Estado actual: {position.status}"
+            )
         return position
+
+    def validate(self, attrs):
+        from django.core.exceptions import ValidationError as DjangoValidationError
+        from apps.storage.utils.push_validation import validate_push_assignment
+
+        attrs = super().validate(attrs)
+        position = attrs.get('position')
+        if position is None and self.instance:
+            position = self.instance.position
+        # Solo validar push si se asigna/cambia posición
+        if 'position' in attrs and attrs['position'] is not None:
+            bin_for_check = self.instance
+            if bin_for_check is None:
+                # create: construir stub mínimo no aplica; validar tras create si hace falta
+                return attrs
+            try:
+                validate_push_assignment(
+                    attrs['position'],
+                    bin_for_check,
+                    exclude_bin_id=bin_for_check.pk,
+                )
+            except DjangoValidationError as exc:
+                raise serializers.ValidationError(
+                    {'position_id': exc.messages if hasattr(exc, 'messages') else [str(exc)]}
+                )
+        return attrs
 
     def create(self, validated_data):
         from apps.storage.models import Position
         from django.utils import timezone
+        from django.core.exceptions import ValidationError as DjangoValidationError
+        from apps.storage.utils.push_validation import validate_push_assignment
 
-        # Crear el bin entry
-        bin = super().create(validated_data)
+        position = validated_data.get('position')
+        bin_entry = super().create(validated_data)
 
-        # Si se asignó una posición, actualizar su estado
-        if 'position' in validated_data and validated_data['position']:
-            position = validated_data['position']
-            # Usar update() directo para evitar validación de FK de created_by
+        if position:
+            try:
+                validate_push_assignment(position, bin_entry, exclude_bin_id=bin_entry.pk)
+            except DjangoValidationError as exc:
+                bin_entry.delete()
+                raise serializers.ValidationError(
+                    {'position_id': exc.messages if hasattr(exc, 'messages') else [str(exc)]}
+                )
             Position.objects.filter(pk=position.pk).update(
                 status=choices.PositionStatus.ASIGNADO,
                 updated_at=timezone.now()
             )
 
-        return bin
+        return bin_entry
 
     def update(self, instance, validated_data):
         from apps.storage.models import Position
         from django.utils import timezone
+        from django.core.exceptions import ValidationError as DjangoValidationError
+        from apps.storage.utils.push_validation import validate_push_assignment
 
         # Si se está cambiando la posición
         old_position = instance.position
@@ -357,6 +397,16 @@ class BinSerializer(serializers.ModelSerializer):
         # Obtener el estado anterior y el nuevo (si se está actualizando)
         old_status = instance.status
         new_status = validated_data.get('status', old_status)
+
+        if 'position' in validated_data and new_position is not None:
+            try:
+                validate_push_assignment(
+                    new_position, instance, exclude_bin_id=instance.pk
+                )
+            except DjangoValidationError as exc:
+                raise serializers.ValidationError(
+                    {'position_id': exc.messages if hasattr(exc, 'messages') else [str(exc)]}
+                )
 
         # Actualizar el bin entry
         bin = super().update(instance, validated_data)
