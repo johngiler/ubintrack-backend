@@ -10,7 +10,7 @@ from django.http import HttpResponse
 from datetime import datetime
 
 from apps.inventory import models as inventory_models
-from apps.inventory.services import export_bin_entries_excel
+from apps.inventory.services import export_bin_entries_excel, export_products_excel
 from apps.common.utils.permissions_mixins import ClientScopeMixin, StrictDjangoModelPermissions
 from apps.core import choices
 from apps.common.utils.zebra import print_to_zebra
@@ -49,6 +49,19 @@ class ProductViewSet(ClientScopeMixin, viewsets.ModelViewSet):
             serializer.save(client=get_user_client(user))
         else:
             serializer.save()
+
+    @action(detail=False, methods=['get'])
+    def export_excel(self, request):
+        """Exporta productos a Excel respetando filtros y búsqueda de la lista."""
+        queryset = self.filter_queryset(self.get_queryset())
+        output = export_products_excel(queryset)
+        filename = f"Productos_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xls"
+        response = HttpResponse(
+            output.getvalue(),
+            content_type='application/vnd.ms-excel',
+        )
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        return response
 
 
 class BinViewSet(ClientScopeMixin, viewsets.ModelViewSet):

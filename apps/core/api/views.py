@@ -1,5 +1,6 @@
 from rest_framework import mixins, viewsets, filters
 from rest_framework.views import APIView
+from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated, BasePermission
 from apps.common.utils.permissions_mixins import ClientScopeMixin, StrictDjangoModelPermissions, WorkspaceScopeMixin
 from rest_framework.authtoken.views import ObtainAuthToken
@@ -7,10 +8,13 @@ from rest_framework.authtoken.models import Token
 from rest_framework.response import Response
 from rest_framework.exceptions import ValidationError, PermissionDenied
 from django.db.models import Count
+from django.http import HttpResponse
 from django_filters.rest_framework import DjangoFilterBackend
+from datetime import datetime
 
 from apps.core import models as core_models
 from apps.core import choices as core_choices
+from apps.core.services import export_clients_excel
 from apps.core.utils.user_roles import (
     can_manage_as_administrator,
     get_user_client,
@@ -149,6 +153,19 @@ class ClientViewSet(ClientScopeMixin, viewsets.ModelViewSet):
         if ws is None:
             raise ValidationError({"detail": "Owner no resuelto."})
         serializer.save(workspace=ws)
+
+    @action(detail=False, methods=['get'])
+    def export_excel(self, request):
+        """Exporta clientes a Excel respetando filtros y búsqueda de la lista."""
+        queryset = self.filter_queryset(self.get_queryset())
+        output = export_clients_excel(queryset)
+        filename = f"Clientes_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xls"
+        response = HttpResponse(
+            output.getvalue(),
+            content_type='application/vnd.ms-excel',
+        )
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        return response
 
 
 class BranchViewSet(WorkspaceScopeMixin, viewsets.ModelViewSet):

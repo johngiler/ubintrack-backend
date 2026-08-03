@@ -607,3 +607,117 @@ def export_bin_entries_excel(bins_queryset):
     output.seek(0)
 
     return output
+
+
+def export_products_excel(products_queryset):
+    """
+    Exporta productos a Excel (respeta el queryset ya filtrado).
+    """
+    wb = xlwt.Workbook(encoding='utf-8')
+    ws = wb.add_sheet('Productos')
+
+    header_style = xlwt.XFStyle()
+    header_font = xlwt.Font()
+    header_font.bold = True
+    header_font.colour_index = xlwt.Style.colour_map['white']
+    header_style.font = header_font
+
+    header_pattern = xlwt.Pattern()
+    header_pattern.pattern = xlwt.Pattern.SOLID_PATTERN
+    header_pattern.pattern_fore_colour = xlwt.Style.colour_map['dark_blue']
+    header_style.pattern = header_pattern
+
+    header_alignment = xlwt.Alignment()
+    header_alignment.horz = xlwt.Alignment.HORZ_CENTER
+    header_alignment.vert = xlwt.Alignment.VERT_CENTER
+    header_style.alignment = header_alignment
+
+    data_style = xlwt.XFStyle()
+    data_alignment = xlwt.Alignment()
+    data_alignment.wrap = 1
+    data_alignment.vert = xlwt.Alignment.VERT_TOP
+    data_style.alignment = data_alignment
+
+    columns = [
+        'Código',
+        'Nombre',
+        'Cliente',
+        'SKU',
+        'Categoría',
+        'Condición',
+        'Rotación',
+        'UOM',
+        'Inventario',
+        'Picking',
+        'Activo',
+        'Proveedor',
+        'Comentario',
+    ]
+
+    for col_num, column_title in enumerate(columns):
+        ws.write(0, col_num, column_title, header_style)
+        ws.row(0).height_mismatch = True
+        ws.row(0).height = 400
+
+    qs = products_queryset.select_related('client', 'category')
+
+    for row_num, product in enumerate(qs, start=1):
+        inventory_total = (
+            models.BinProduct.objects.filter(
+                entry_product__product=product,
+                bin__status=BinStatus.ALMACENADO,
+            ).aggregate(total=Sum('quantity'))['total']
+            or 0
+        )
+
+        ws.write(row_num, 0, product.code or '', data_style)
+        ws.write(row_num, 1, product.name or '', data_style)
+        ws.write(
+            row_num,
+            2,
+            product.client.name if product.client_id else '',
+            data_style,
+        )
+        ws.write(row_num, 3, product.client_sku or '', data_style)
+        ws.write(
+            row_num,
+            4,
+            product.category.name if product.category_id else '',
+            data_style,
+        )
+        ws.write(
+            row_num,
+            5,
+            product.get_condition_display() if product.condition else '',
+            data_style,
+        )
+        ws.write(
+            row_num,
+            6,
+            product.get_rotation_type_display() if product.rotation_type else '',
+            data_style,
+        )
+        ws.write(
+            row_num,
+            7,
+            product.get_uom_display() if product.uom else '',
+            data_style,
+        )
+        ws.write(row_num, 8, inventory_total, data_style)
+        ws.write(row_num, 9, 'Sí' if product.is_picking else 'No', data_style)
+        ws.write(
+            row_num,
+            10,
+            'Sí' if getattr(product, 'is_active', True) else 'No',
+            data_style,
+        )
+        ws.write(row_num, 11, product.supplier or '', data_style)
+        ws.write(row_num, 12, product.comment or '', data_style)
+
+    for col_num in range(len(columns)):
+        ws.col(col_num).width = 256 * 28
+
+    output = BytesIO()
+    wb.save(output)
+    output.seek(0)
+    return output
