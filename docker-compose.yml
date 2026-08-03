@@ -1,0 +1,28 @@
+# Postgres local (solo desarrollo). Prod usa Postgres nativo del servidor.
+# Uso:
+#   cd backend && docker-compose up -d
+#   docker-compose down          # para el contenedor (conserva datos)
+#   docker-compose down -v       # borra también el volumen
+# (Si tienes plugin Compose V2: docker compose up -d)
+
+services:
+  db:
+    image: postgres:16
+    container_name: ubintrack-postgres-local
+    restart: unless-stopped
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-ubintrack}
+      POSTGRES_USER: ${POSTGRES_USER:-ubintrack}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Definir POSTGRES_PASSWORD en .env}
+    volumes:
+      - ubintrack_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  ubintrack_pgdata:
