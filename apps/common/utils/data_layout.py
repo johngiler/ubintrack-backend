@@ -28,7 +28,7 @@ def tenant_data_dir(workspace_slug: str, *relative_parts: str) -> Path:
 
     Ejemplo::
 
-        tenant_data_dir("rbcold", "imports", "pending") → data/rbcold/imports/pending/
+        tenant_data_dir("acme", "imports", "pending") → data/acme/imports/pending/
     """
     seg = safe_data_tenant_segment(workspace_slug)
     return (backend_repo_root() / "data" / seg / Path(*relative_parts)).resolve()
