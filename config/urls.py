@@ -12,6 +12,7 @@ from apps.inventory.api import views as inventory_views
 from apps.order.api import views as order_views
 from apps.storage.api import views as storage_views
 from apps.task.api import views as task_views
+from apps.notifications.views import NotificationViewSet
 from apps.workspaces.api.views import WorkspaceCurrentView, WorkspaceMeView
 
 admin.site.site_header = _("Administración")
@@ -43,6 +44,7 @@ router.register(r"billing", finance_views.BillingCalculationViewSet, basename="b
 router.register(r"tasks", task_views.TaskViewSet)
 router.register(r"task-logs", task_views.TaskLogViewSet)
 router.register(r"task-trackings", task_views.UserTaskTrackingViewSet)
+router.register(r"notifications", NotificationViewSet, basename="notifications")
 
 urlpatterns = [
     path("admin/", admin.site.urls),

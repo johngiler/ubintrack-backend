@@ -3,7 +3,7 @@ Description=Ubintrack ops tmux (gunicorn / celery / daphne logs + btop)
 Documentation=file:///home/git/backend/scripts/tmux_ops.sh
 After=network.target
 # Start after app log writers when present (does not hard-require them).
-Wants=ubintrack-api.service
+Wants=ubintrack-api.service ubintrack-daphne.service
 
 [Service]
 Type=simple

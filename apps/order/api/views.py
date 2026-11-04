@@ -79,8 +79,11 @@ class EntryViewSet(ClientScopeMixin, viewsets.ModelViewSet):
                 from rest_framework.exceptions import ValidationError
                 raise ValidationError(
                     {'status': 'Usuarios cliente solo pueden establecer estados "pendiente" o "cancelada".'})
-        serializer.save(
+        entry = serializer.save(
             client=client or serializer.validated_data.get('client'))
+        from apps.notifications.services import notify_entry_created
+
+        notify_entry_created(entry=entry, actor=user)
 
     def perform_update(self, serializer):
         from rest_framework.exceptions import ValidationError
@@ -459,8 +462,11 @@ class ExitViewSet(ClientScopeMixin, viewsets.ModelViewSet):
                 from rest_framework.exceptions import ValidationError
                 raise ValidationError(
                     {'status': 'Usuarios cliente solo pueden establecer estados "pendiente" o "cancelada".'})
-        serializer.save(
+        exit_order = serializer.save(
             client=client or serializer.validated_data.get('client'))
+        from apps.notifications.services import notify_exit_created
+
+        notify_exit_created(exit_order=exit_order, actor=user)
 
     # Eliminar la primera versión duplicada de perform_update y consolidar lógica aquí
     def perform_update(self, serializer):

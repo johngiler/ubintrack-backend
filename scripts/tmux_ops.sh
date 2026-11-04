@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # Ubintrack ops dashboard in tmux (API host).
 #
-# Layout (sin Celery/Daphne aún — btop a ancho completo):
+# Layout (sin Celery — daphne + btop en la fila inferior):
 #   ┌─────────────────────────────────────────┐
 #   │  gunicorn logs (error + access, ccze)   │
-#   ├─────────────────────────────────────────┤
-#   │  btop                                   │
-#   └─────────────────────────────────────────┘
+#   ├──────────────────────┬──────────────────┤
+#   │  daphne.log          │  btop            │
+#   └──────────────────────┴──────────────────┘
 #
 # Usage:
 #   ./scripts/tmux_ops.sh start|stop|restart|status|attach|run
@@ -26,6 +26,7 @@ SESSION="${UBINTRACK_TMUX_SESSION:-ubintrack-ops}"
 GUNICORN_LOG="${UBINTRACK_GUNICORN_LOG:-/var/log/gunicorn/gunicorn.log}"
 GUNICORN_ACCESS_LOG="${UBINTRACK_GUNICORN_ACCESS_LOG:-/var/log/gunicorn/gunicorn-access.log}"
 GUNICORN_ERROR_LOG="${UBINTRACK_GUNICORN_ERROR_LOG:-/var/log/gunicorn/gunicorn-error.log}"
+DAPHNE_LOG="${UBINTRACK_DAPHNE_LOG:-/var/log/daphne.log}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BTOP_CONF_SRC="${UBINTRACK_BTOP_CONF:-$SCRIPT_DIR/btop.conf}"
 BTOP_CONF_DST="${HOME:-/home/git}/.config/btop/btop.conf"
@@ -88,11 +89,14 @@ cmd_start() {
   tmux set-window-option -t "${SESSION}:ops" window-size manual
   tmux resize-window -t "${SESSION}:ops" -x "$boot_cols" -y "$boot_rows"
 
-  # Bottom = btop full width (no celery/daphne columns until those services exist).
+  # Bottom row: daphne | btop
   tmux split-window -v -t "${SESSION}:ops.0" -l "$bottom_rows" \
+    "tail -n 200 -F ${DAPHNE_LOG} 2>/dev/null ${colorize}"
+  tmux split-window -h -t "${SESSION}:ops.1" \
     "$(btop_cmd)"
 
   tmux select-pane -t "${SESSION}:ops.0"
+  tmux select-layout -t "${SESSION}:ops" main-horizontal
   tmux resize-pane -t "${SESSION}:ops.0" -y "45%"
 
   # Follow the attaching client size (not the bootstrap 160x48).

@@ -1,0 +1,19 @@
+[Unit]
+Description=Ubintrack API WebSockets (Daphne / Channels)
+After=network.target redis-server.service postgresql.service ubintrack-api.service
+Wants=redis-server.service
+
+[Service]
+User=git
+Group=git
+WorkingDirectory=/home/git/backend
+Environment="PATH=/home/git/backend/.venv/bin"
+# HTTP API stays on gunicorn :8000; Daphne serves ASGI (WebSockets) on :8001.
+ExecStart=/home/git/backend/.venv/bin/daphne -b 127.0.0.1 -p 8001 --access-log /var/log/daphne.log --proxy-headers -v 1 config.asgi:application
+Restart=always
+RestartSec=5
+StandardOutput=append:/var/log/daphne.log
+StandardError=append:/var/log/daphne.log
+
+[Install]
+WantedBy=multi-user.target

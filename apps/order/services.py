@@ -2533,6 +2533,9 @@ def import_exits_from_excel(file, user=None, exit_date_override=None):
                 created_by=user,
                 updated_by=user
             )
+            from apps.notifications.services import notify_exit_created
+
+            notify_exit_created(exit_order=exit_order, actor=user)
 
             # Crear productos de la orden usando generate_exit_products
             for product_data in order_data['products']:

@@ -116,6 +116,21 @@ else
   exit 1
 fi
 
+# Daphne — optional restart (default: no). Needed when consumer/ASGI code changes.
+read -r -p "[deploy] ¿Reiniciar daphne (WebSockets / campanita)? [y/N] " RESTART_DAPHNE
+if [[ "${RESTART_DAPHNE}" =~ ^[yY]$ ]]; then
+  echo "[deploy] Restarting ubintrack-daphne.service..."
+  if ssh "$REMOTE_HOST" "systemctl is-enabled ubintrack-daphne.service >/dev/null 2>&1"; then
+    ssh "$REMOTE_HOST" "systemctl restart ubintrack-daphne.service"
+  else
+    echo "[deploy] WARN: ubintrack-daphne.service not installed yet."
+    echo "cp scripts/systemd/ubintrack-daphne.service /etc/systemd/system/ubintrack-daphne.service"
+    echo "systemctl daemon-reload && systemctl enable --now ubintrack-daphne.service"
+  fi
+else
+  echo "[deploy] Daphne left running (no restart)."
+fi
+
 if ssh "$REMOTE_HOST" "systemctl is-active nginx >/dev/null 2>&1"; then
   ssh "$REMOTE_HOST" "systemctl reload nginx"
 fi

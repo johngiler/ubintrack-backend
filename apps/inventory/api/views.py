@@ -99,8 +99,11 @@ class BinViewSet(ClientScopeMixin, viewsets.ModelViewSet):
         client = None
         if is_client_user(user):
             client = get_user_client(user)
-        serializer.save(
+        bin_obj = serializer.save(
             client=client or serializer.validated_data.get('client'))
+        from apps.notifications.services import notify_bin_created
+
+        notify_bin_created(bin_obj=bin_obj, actor=user)
 
     @transaction.atomic
     def perform_update(self, serializer):

@@ -36,6 +36,7 @@ CORS_ALLOWED_ORIGINS = []
 CORS_ALLOW_HEADERS = (*default_headers, "x-workspace-slug")
 
 INSTALLED_APPS = [
+    "daphne",
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
@@ -46,6 +47,7 @@ INSTALLED_APPS = [
     "rest_framework",
     "rest_framework.authtoken",
     "django_filters",
+    "channels",
     "apps.common.apps.CommonConfig",
     "apps.workspaces.apps.WorkspacesConfig",
     "apps.core",
@@ -55,6 +57,7 @@ INSTALLED_APPS = [
     "apps.finance",
     "apps.task",
     "apps.dashboard",
+    "apps.notifications.apps.NotificationsConfig",
 ]
 
 MIDDLEWARE = [
@@ -74,6 +77,18 @@ MIDDLEWARE = [
 
 ROOT_URLCONF = "config.urls"
 WSGI_APPLICATION = "config.wsgi.application"
+ASGI_APPLICATION = "config.asgi.application"
+
+# Redis channel layer for Daphne ↔ Gunicorn (campanita). Index /1 vs PortPax /0.
+REDIS_URL = os.environ.get("REDIS_URL", "redis://127.0.0.1:6379/1")
+CHANNEL_LAYERS = {
+    "default": {
+        "BACKEND": "channels_redis.core.RedisChannelLayer",
+        "CONFIG": {
+            "hosts": [REDIS_URL],
+        },
+    },
+}
 
 TEMPLATES = [
     {
