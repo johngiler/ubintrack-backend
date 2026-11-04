@@ -1,0 +1,4 @@
+# SSH listens on 2200 on BCT hosts; default "ssh" = 22 would ban the wrong port.
+[sshd]
+enabled = true
+port    = 2200
