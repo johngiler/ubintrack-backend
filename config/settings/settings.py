@@ -3,11 +3,10 @@ Configuración común del proyecto + defaults de desarrollo local.
 
 Convención:
 - settings.py          → compartido + Django dev (DEBUG=True, CORS abierto; SQLite por defecto).
-- local_settings.py    → overrides locales (gitignored). En local: Postgres Docker
-                         (ver local_settings.local.example.py + docker-compose.yml).
-                         En el servidor: copia de local_settings.production.py.
-- local_settings.production.py → Django producción (gitignored).
-- .env                 → POSTGRES_*, Zebra, etc. (misma forma en local y prod).
+- local_settings.py    → overrides (gitignored). Local: copiar local_settings.local.template.py
+                         + Postgres Docker (docker-compose.yml). Prod: copiar
+                         local_settings.production.template.py en el server.
+- .env                 → POSTGRES_*, Zebra, etc. (gitignored; ver .env.*.template).
 """
 import os
 from pathlib import Path

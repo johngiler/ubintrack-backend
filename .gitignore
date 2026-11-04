@@ -5,6 +5,7 @@ db.sqlite3
 .env
 .env.local
 .env.production
+# Plantillas versionadas: .env.*.template / local_settings.*.template.py
 config/settings/local_settings.py
 config/settings/local_settings.local.py
 config/settings/local_settings.production.py
