@@ -135,8 +135,31 @@ Deploys siguientes (solo código y reinicio de API; ver scripts/deploy.sh)
 cd "$LOCAL_BACKEND" && ./scripts/deploy.sh
 
 Nota: deploy.sh sincroniza el código Django, instala deps, migra, collectstatic y
-      reinicia ubintrack-api. No toca nginx, systemd ni cron.
+      reinicia ubintrack-api. No toca nginx, systemd, cron, fail2ban ni tmux.
       Si cambias esos archivos, vuelve a copiarlos aquí y ejecuta daemon-reload /
       reload nginx según corresponda.
+
+──────────────────────────────────────────────────────────────────────────────
+Ops (tmux / btop / fail2ban / nginx hardening) — una sola vez en el API host
+──────────────────────────────────────────────────────────────────────────────
+# Paquetes + fail2ban jail:
+ssh "${REMOTE_HOST}" "apt-get update -qq && apt-get install -y -qq tmux btop ccze fail2ban"
+ssh "${REMOTE_HOST}" "cd ${REMOTE_PATH} && sudo ./scripts/fail2ban/install.sh"
+
+# tmux ops dashboard (usuario git via systemd):
+scp "$LOCAL_BACKEND/scripts/systemd/tmux.service" "${REMOTE_HOST}:/tmp/tmux.service"
+ssh "${REMOTE_HOST}" "sudo cp /tmp/tmux.service /etc/systemd/system/tmux.service && \
+  sudo systemctl daemon-reload && sudo systemctl enable --now tmux.service"
+
+# Nginx maps + vhost endurecido (444 / rate limit / UA drop):
+scp "$LOCAL_BACKEND/scripts/nginx/conf.d/ubintrack-api-maps.conf" \
+  "${REMOTE_HOST}:/tmp/ubintrack-api-maps.conf"
+scp "$LOCAL_BACKEND/scripts/nginx/api.ubintrack.com.conf" \
+  "${REMOTE_HOST}:/tmp/api.ubintrack.com.conf"
+ssh "${REMOTE_HOST}" "sudo cp /tmp/ubintrack-api-maps.conf /etc/nginx/conf.d/ubintrack-api-maps.conf && \
+  sudo cp /tmp/api.ubintrack.com.conf /etc/nginx/sites-available/api.ubintrack.com.conf && \
+  sudo nginx -t && sudo systemctl reload nginx"
+
+# Attach: ssh -t ubintrack-api 'sudo -u git tmux attach -t ubintrack-ops'
 
 EOF

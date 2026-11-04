@@ -1,0 +1,13 @@
+# Fail2ban jail — Ubintrack API (nginx).
+# Install via: sudo ./scripts/fail2ban/install.sh
+
+[ubintrack-nginx]
+enabled  = true
+filter   = ubintrack-nginx
+logpath  = /var/log/nginx/access.log
+backend  = auto
+port     = http,https
+maxretry = 8
+findtime = 10m
+bantime  = 1h
+ignoreip = 127.0.0.1/8 ::1
