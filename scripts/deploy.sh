@@ -117,22 +117,26 @@ else
 fi
 
 # Daphne — optional restart (default: no). Needed when consumer/ASGI code changes.
-read -r -p "[deploy] ¿Reiniciar daphne (WebSockets / campanita)? [y/N] " RESTART_DAPHNE
+# || true: con stdin no-TTY (pipes/CI), read falla y set -e abortaría el deploy.
+RESTART_DAPHNE=""
+read -r -p "[deploy] ¿Reiniciar daphne (WebSockets / campanita)? [y/N] " RESTART_DAPHNE || true
 if [[ "${RESTART_DAPHNE}" =~ ^[yY]$ ]]; then
   echo "[deploy] Restarting ubintrack-daphne.service..."
   if ssh "$REMOTE_HOST" "systemctl is-enabled ubintrack-daphne.service >/dev/null 2>&1"; then
     ssh "$REMOTE_HOST" "systemctl restart ubintrack-daphne.service"
+    ssh "$REMOTE_HOST" "systemctl is-active --quiet ubintrack-daphne.service"
+    echo "[deploy] ubintrack-daphne activo"
   else
     echo "[deploy] WARN: ubintrack-daphne.service not installed yet."
-    echo "cp scripts/systemd/ubintrack-daphne.service /etc/systemd/system/ubintrack-daphne.service"
-    echo "systemctl daemon-reload && systemctl enable --now ubintrack-daphne.service"
+    echo "scp scripts/systemd/ubintrack-daphne.service ubintrack-api:/tmp/"
+    echo "ssh ubintrack-api 'cp /tmp/ubintrack-daphne.service /etc/systemd/system/ && systemctl daemon-reload && systemctl enable --now ubintrack-daphne'"
   fi
 else
   echo "[deploy] Daphne left running (no restart)."
 fi
 
 if ssh "$REMOTE_HOST" "systemctl is-active nginx >/dev/null 2>&1"; then
-  ssh "$REMOTE_HOST" "systemctl reload nginx"
+  ssh "$REMOTE_HOST" "systemctl reload nginx" || echo "[deploy] WARN: nginx reload failed"
 fi
 
 echo "[deploy] Done. https://api.ubintrack.com"
