@@ -45,6 +45,16 @@ class CustomObtainAuthToken(ObtainAuthToken):
         return Response({"token": token.key, "user": user_serializer.data})
 
 
+class LogoutView(APIView):
+    """Invalida el token de la sesión actual."""
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        Token.objects.filter(user=request.user).delete()
+        return Response(status=204)
+
+
 class CanManageWorkspaceUsers(BasePermission):
     """Solo administrador del owner (o staff de plataforma) gestiona usuarios."""
 

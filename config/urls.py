@@ -49,6 +49,7 @@ router.register(r"notifications", NotificationViewSet, basename="notifications")
 urlpatterns = [
     path("admin/", admin.site.urls),
     path("api/auth/login/", core_views.CustomObtainAuthToken.as_view()),
+    path("api/auth/logout/", core_views.LogoutView.as_view()),
     path("api/me/", core_views.MeProfileView.as_view()),
     path("api/workspace/current/", WorkspaceCurrentView.as_view(), name="workspace-current"),
     path("api/me/workspace/", WorkspaceMeView.as_view(), name="workspace-me"),
