@@ -13,6 +13,7 @@ from apps.order.api import views as order_views
 from apps.storage.api import views as storage_views
 from apps.task.api import views as task_views
 from apps.notifications.views import NotificationViewSet
+from apps.notifications.views_frontend_build import FrontendBuildPublishView
 from apps.workspaces.api.views import WorkspaceCurrentView, WorkspaceMeView
 
 admin.site.site_header = _("Administración")
@@ -62,6 +63,11 @@ urlpatterns = [
     path("api/warehouse/structure/", dashboard_views.WarehouseStructureView.as_view(), name="warehouse-structure"),
     path("api/dashboard/client-stats/", dashboard_views.ClientStatsView.as_view(), name="client-stats"),
     path("api/nav/counts/", dashboard_views.NavCountsView.as_view(), name="nav-counts"),
+    path(
+        "api/notifications/frontend-build/",
+        FrontendBuildPublishView.as_view(),
+        name="frontend-build-publish",
+    ),
     path("api/", include(router.urls)),
 ]
 

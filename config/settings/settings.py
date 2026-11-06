@@ -162,6 +162,8 @@ CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
 CELERY_TIMEZONE = TIME_ZONE
+# El deploy del frontend publica este id para avisar a las sesiones abiertas.
+FRONTEND_BUILD_PUBLISH_TOKEN = os.environ.get("FRONTEND_BUILD_PUBLISH_TOKEN", "")
 # macOS crea los procesos del worker con spawn y la tarea falla al arrancar.
 # En Linux el pool sigue siendo prefork.
 if sys.platform == "darwin":

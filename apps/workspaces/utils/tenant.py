@@ -58,6 +58,21 @@ def _tenant_apex_for_resolution() -> str:
     return ""
 
 
+def workspace_from_http_headers(host: str = "", origin: str = "", referer: str = "") -> Workspace | None:
+    """Owner a partir de Host / Origin / Referer. Sin slug, no elige uno por defecto."""
+    base = _tenant_apex_for_resolution()
+    if not base:
+        return None
+    slug = _slug_from_host((host or "").split(":")[0], base)
+    if slug is None and origin:
+        slug = _slug_from_url(origin, base)
+    if slug is None and referer:
+        slug = _slug_from_url(referer, base)
+    if not slug:
+        return None
+    return Workspace.objects.filter(slug=slug, is_active=True).first()
+
+
 def resolve_request_workspace(request) -> tuple[Workspace | None, str | None]:
     """
     Devuelve (workspace, error_code).
