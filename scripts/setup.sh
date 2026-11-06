@@ -156,7 +156,7 @@ Ops (tmux / btop / fail2ban / nginx hardening) — una sola vez en el API host
 ssh "${REMOTE_HOST}" "apt-get update -qq && apt-get install -y -qq tmux btop ccze fail2ban"
 ssh "${REMOTE_HOST}" "cd ${REMOTE_PATH} && sudo ./scripts/fail2ban/install.sh"
 
-# tmux ops dashboard (gunicorn | daphne | btop; usuario git via systemd):
+# tmux ops dashboard (gunicorn arriba; celery | daphne | btop abajo):
 scp "$LOCAL_BACKEND/scripts/systemd/tmux.service" "${REMOTE_HOST}:/tmp/tmux.service"
 ssh "${REMOTE_HOST}" "sudo cp /tmp/tmux.service /etc/systemd/system/tmux.service && \
   sudo systemctl daemon-reload && sudo systemctl enable --now tmux.service"

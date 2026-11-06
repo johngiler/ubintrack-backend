@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # Ubintrack ops dashboard in tmux (API host).
 #
-# Layout (sin Celery — daphne + btop en la fila inferior):
+# Layout:
 #   ┌─────────────────────────────────────────┐
 #   │  gunicorn logs (error + access, ccze)   │
-#   ├──────────────────────┬──────────────────┤
-#   │  daphne.log          │  btop            │
-#   └──────────────────────┴──────────────────┘
+#   ├─────────────┬─────────────┬─────────────┤
+#   │ celery.log  │ daphne.log  │    btop     │
+#   └─────────────┴─────────────┴─────────────┘
 #
 # Usage:
 #   ./scripts/tmux_ops.sh start|stop|restart|status|attach|run
@@ -26,6 +26,7 @@ SESSION="${UBINTRACK_TMUX_SESSION:-ubintrack-ops}"
 GUNICORN_LOG="${UBINTRACK_GUNICORN_LOG:-/var/log/gunicorn/gunicorn.log}"
 GUNICORN_ACCESS_LOG="${UBINTRACK_GUNICORN_ACCESS_LOG:-/var/log/gunicorn/gunicorn-access.log}"
 GUNICORN_ERROR_LOG="${UBINTRACK_GUNICORN_ERROR_LOG:-/var/log/gunicorn/gunicorn-error.log}"
+CELERY_LOG="${UBINTRACK_CELERY_LOG:-/var/log/celery.log}"
 DAPHNE_LOG="${UBINTRACK_DAPHNE_LOG:-/var/log/daphne.log}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BTOP_CONF_SRC="${UBINTRACK_BTOP_CONF:-$SCRIPT_DIR/btop.conf}"
@@ -77,10 +78,9 @@ cmd_start() {
   colorize="$(colorize_pipe)"
   # Bootstrap size only — systemd has no TTY. After the layout exists we switch
   # to window-size latest so attach fills the real client terminal.
-  # btop needs >= 80 cols; keep bootstrap wide so the pane never starts undersized.
-  local boot_cols=160
-  local boot_rows=48
-  local bottom_rows=$(( boot_rows * 55 / 100 ))
+  local boot_cols=120
+  local boot_rows=40
+  local bottom_rows=$(( boot_rows / 2 ))
 
   tmux new-session -d -s "$SESSION" -n ops \
     "tail -n 200 -F ${GUNICORN_LOG} ${GUNICORN_ACCESS_LOG} ${GUNICORN_ERROR_LOG} 2>/dev/null ${colorize}"
@@ -89,17 +89,19 @@ cmd_start() {
   tmux set-window-option -t "${SESSION}:ops" window-size manual
   tmux resize-window -t "${SESSION}:ops" -x "$boot_cols" -y "$boot_rows"
 
-  # Bottom row: daphne | btop
+  # Bottom row (50% height): celery | daphne | btop
   tmux split-window -v -t "${SESSION}:ops.0" -l "$bottom_rows" \
-    "tail -n 200 -F ${DAPHNE_LOG} 2>/dev/null ${colorize}"
+    "tail -n 200 -F ${CELERY_LOG} 2>/dev/null ${colorize}"
   tmux split-window -h -t "${SESSION}:ops.1" \
+    "tail -n 200 -F ${DAPHNE_LOG} 2>/dev/null ${colorize}"
+  tmux split-window -h -t "${SESSION}:ops.2" \
     "$(btop_cmd)"
 
   tmux select-pane -t "${SESSION}:ops.0"
   tmux select-layout -t "${SESSION}:ops" main-horizontal
-  tmux resize-pane -t "${SESSION}:ops.0" -y "45%"
+  tmux resize-pane -t "${SESSION}:ops.0" -y "50%"
 
-  # Follow the attaching client size (not the bootstrap 160x48).
+  # Follow the attaching client size (not the bootstrap 120x40).
   tmux set-window-option -t "${SESSION}:ops" window-size latest
   tmux set-window-option -t "${SESSION}:ops" aggressive-resize on
 
