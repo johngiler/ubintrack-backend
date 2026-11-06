@@ -84,14 +84,6 @@ class Command(BaseCommand):
         if levels < 1:
             raise CommandError("--levels debe ser >= 1")
 
-        valid_halls = {choice[0] for choice in Position.HALL_CHOICES}
-        invalid_halls = set(halls) - valid_halls
-        if invalid_halls:
-            raise CommandError(
-                f"Pasillos inválidos: {', '.join(sorted(invalid_halls))}. "
-                f"Valores permitidos: {', '.join(sorted(valid_halls))}"
-            )
-
         cava = self._resolve_cava(cava_name, options["workspace_slug"])
         total_expected = len(halls) * racks * levels * len(places)
 
@@ -114,12 +106,13 @@ class Command(BaseCommand):
 
         for hall in halls:
             for rack in range(1, racks + 1):
+                rack_code = str(rack)
                 for level in range(1, levels + 1):
                     for place in places:
                         exists = Position.objects.filter(
                             cava=cava,
                             hall=hall,
-                            rack=rack,
+                            rack=rack_code,
                             level=level,
                             place=place,
                         ).exists()
@@ -136,7 +129,7 @@ class Command(BaseCommand):
                             position = Position(
                                 cava=cava,
                                 hall=hall,
-                                rack=rack,
+                                rack=rack_code,
                                 level=level,
                                 place=place,
                                 status=status,

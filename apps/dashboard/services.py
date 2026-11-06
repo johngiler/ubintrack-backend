@@ -256,19 +256,27 @@ def build_client_stats(workspace) -> list:
 
 
 def _cava_position_stats(workspace, cava_id: int) -> dict:
-    qs = _positions_qs(workspace).filter(cava_id=cava_id)
+    """Cuenta todas las posiciones de la cava. La inactiva va aparte del estado."""
+    qs = Position.objects.filter(
+        cava__storage__workspace=workspace,
+        cava_id=cava_id,
+        cava__is_virtual=False,
+    )
+    active = Q(is_active=True)
     agg = qs.aggregate(
         total=Count('id'),
-        libre=Count('id', filter=Q(status=choices.PositionStatus.LIBRE)),
-        ocupada=Count('id', filter=Q(status=choices.PositionStatus.OCUPADO)),
-        asignada=Count('id', filter=Q(status=choices.PositionStatus.ASIGNADO)),
-        picking=Count('id', filter=Q(is_picking=True)),
+        libre=Count('id', filter=active & Q(status=choices.PositionStatus.LIBRE)),
+        ocupada=Count('id', filter=active & Q(status=choices.PositionStatus.OCUPADO)),
+        asignada=Count('id', filter=active & Q(status=choices.PositionStatus.ASIGNADO)),
+        inactiva=Count('id', filter=Q(is_active=False)),
+        picking=Count('id', filter=active & Q(is_picking=True)),
     )
     return {
         'total': agg['total'] or 0,
         'libre': agg['libre'] or 0,
         'ocupada': agg['ocupada'] or 0,
         'asignada': agg['asignada'] or 0,
+        'inactiva': agg['inactiva'] or 0,
         'picking': agg['picking'] or 0,
     }
 
@@ -315,13 +323,18 @@ def build_warehouse_structure(workspace) -> dict | None:
     if not storage:
         return None
 
-    cavas = Cava.objects.filter(storage=storage, is_active=True).order_by('name')
+    cavas = (
+        Cava.objects.filter(storage=storage, is_active=True)
+        .prefetch_related("blocks")
+        .order_by("name")
+    )
     cavas_data = []
     global_stats = {
         'total_positions': 0,
         'libre_positions': 0,
         'ocupada_positions': 0,
         'asignada_positions': 0,
+        'inactiva_positions': 0,
         'picking_positions': 0,
         'utilization_rate': 0.0,
     }
@@ -332,6 +345,7 @@ def build_warehouse_structure(workspace) -> dict | None:
         libre_positions = stats['libre']
         ocupada_positions = stats['ocupada']
         asignada_positions = stats['asignada']
+        inactiva_positions = stats['inactiva']
         picking_positions = stats['picking']
 
         utilization_rate = 0.0
@@ -343,13 +357,29 @@ def build_warehouse_structure(workspace) -> dict | None:
         global_stats['libre_positions'] += libre_positions
         global_stats['ocupada_positions'] += ocupada_positions
         global_stats['asignada_positions'] += asignada_positions
+        global_stats['inactiva_positions'] += inactiva_positions
         global_stats['picking_positions'] += picking_positions
 
         cavas_data.append({
             'id': cava.id,
             'name': cava.name,
+            'code': cava.code,
             'condition': cava.condition,
             'current_temp': cava.current_temp,
+            'blocks': [
+                {
+                    'id': block.id,
+                    'kind': block.kind,
+                    'code': block.code,
+                    'rack_count': block.rack_count,
+                    'levels': block.levels,
+                    'depth': block.depth,
+                    'orientation': block.orientation,
+                    'label_side': block.label_side,
+                    'aisle_code': block.aisle_code,
+                }
+                for block in cava.blocks.all()
+            ],
             'total_levels': cava.total_levels,
             'positions_has_been_generated': cava.positions_has_been_generated,
             'is_active': cava.is_active,
@@ -359,6 +389,7 @@ def build_warehouse_structure(workspace) -> dict | None:
                 'libre_positions': libre_positions,
                 'ocupada_positions': ocupada_positions,
                 'asignada_positions': asignada_positions,
+                'inactiva_positions': inactiva_positions,
                 'picking_positions': picking_positions,
                 'utilization_rate': round(utilization_rate, 2),
             },

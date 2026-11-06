@@ -12,10 +12,38 @@ class StorageAdmin(admin.ModelAdmin):
     autocomplete_fields = ("workspace",)
 
 
+@admin.register(models.PositionNomenclature)
+class PositionNomenclatureAdmin(admin.ModelAdmin):
+    list_display = (
+        "workspace",
+        "separator",
+        "cava_prefix",
+        "aisle_prefix",
+        "rack_prefix",
+        "level_prefix",
+    )
+    autocomplete_fields = ("workspace",)
+
+
 @admin.register(models.Cava)
 class CavaAdmin(admin.ModelAdmin):
-    list_display = ('name', 'condition', 'total_levels', 'is_virtual')
-    list_filter = ('condition', 'is_virtual')
+    list_display = ("name", "code", "condition", "total_levels", "is_virtual")
+    list_filter = ("condition", "is_virtual")
+    search_fields = ("name", "code")
+
+
+@admin.register(models.CavaBlock)
+class CavaBlockAdmin(admin.ModelAdmin):
+    list_display = ("cava", "sort_order", "kind", "code", "rack_count", "levels", "depth", "orientation")
+    list_filter = ("kind",)
+    autocomplete_fields = ("cava",)
+
+
+@admin.register(models.CavaGenerationJob)
+class CavaGenerationJobAdmin(admin.ModelAdmin):
+    list_display = ("cava", "workspace", "status", "expected_count", "created_count", "skipped_count")
+    list_filter = ("status", "workspace")
+    readonly_fields = ("cava", "workspace", "status", "expected_count", "created_count", "skipped_count")
 
 
 @admin.register(models.Position)

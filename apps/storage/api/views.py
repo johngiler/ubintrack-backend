@@ -1,3 +1,5 @@
+import logging
+
 from rest_framework import viewsets, filters, status
 from rest_framework.exceptions import ValidationError
 from apps.core.utils.user_roles import is_client_user
@@ -6,16 +8,49 @@ from apps.common.utils.permissions_mixins import DenyClientUsers, StrictDjangoMo
 from apps.workspaces.utils.tenant import get_workspace_for_request
 from rest_framework.decorators import action
 from rest_framework.response import Response
+from rest_framework.views import APIView
 from apps.common.pagination import MediumPagination
 from django_filters.rest_framework import DjangoFilterBackend
+import django_filters
 from django.core.files import File
-from django.db.models import Prefetch, Q
+from django.db.models import Count, Prefetch, Q
 
 from apps.storage import models as storage_models
+from apps.storage.generation import iter_slots
+from apps.storage.tasks import generate_cava_positions
+
+logger = logging.getLogger(__name__)
 from apps.inventory import models as inventory_models
 from apps.common.utils.zebra import print_to_zebra
 
 from . import serializers
+
+
+class PositionNomenclatureView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def _workspace(self, request):
+        ws = get_workspace_for_request(request)
+        if ws is None:
+            raise ValidationError({"detail": "No se pudo completar la operación."})
+        return ws
+
+    def get(self, request):
+        if is_client_user(request.user):
+            return Response({"detail": "No autorizado."}, status=status.HTTP_403_FORBIDDEN)
+        ws = self._workspace(request)
+        obj, _created = storage_models.PositionNomenclature.objects.get_or_create(workspace=ws)
+        return Response(serializers.PositionNomenclatureSerializer(obj).data)
+
+    def patch(self, request):
+        if is_client_user(request.user):
+            return Response({"detail": "No autorizado."}, status=status.HTTP_403_FORBIDDEN)
+        ws = self._workspace(request)
+        obj, _created = storage_models.PositionNomenclature.objects.get_or_create(workspace=ws)
+        serializer = serializers.PositionNomenclatureSerializer(obj, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data)
 
 
 class StorageViewSet(WorkspaceScopeMixin, viewsets.ModelViewSet):
@@ -37,7 +72,12 @@ class StorageViewSet(WorkspaceScopeMixin, viewsets.ModelViewSet):
 
 
 class CavaViewSet(WorkspaceScopeMixin, viewsets.ModelViewSet):
-    queryset = storage_models.Cava.objects.select_related("storage").all().order_by("-created_at")
+    queryset = (
+        storage_models.Cava.objects.select_related("storage")
+        .prefetch_related("blocks")
+        .annotate(position_count=Count("positions"))
+        .order_by("-created_at")
+    )
     serializer_class = serializers.CavaSerializer
     pagination_class = MediumPagination
     permission_classes = [IsAuthenticated, StrictDjangoModelPermissions]
@@ -48,13 +88,132 @@ class CavaViewSet(WorkspaceScopeMixin, viewsets.ModelViewSet):
     def get_queryset(self):
         return self.scope_to_workspace(super().get_queryset())
 
+    @action(detail=True, methods=["post"])
+    def generate(self, request, pk=None):
+        if is_client_user(request.user):
+            return Response({"detail": "No autorizado."}, status=status.HTTP_403_FORBIDDEN)
+
+        cava = self.get_object()
+        active = storage_models.CavaGenerationJob.Status
+        if cava.generation_jobs.filter(status__in=(active.PENDING, active.RUNNING)).exists():
+            return Response(
+                {"detail": "En proceso. Puedes continuar mientras se crean."},
+                status=status.HTTP_409_CONFLICT,
+            )
+        slot_count = sum(1 for _ in iter_slots(cava))
+        if slot_count < 1:
+            return Response(
+                {"detail": "Agregue al menos un rack."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        workspace = cava.storage.workspace
+        job = storage_models.CavaGenerationJob.objects.create(
+            cava=cava,
+            workspace=workspace,
+            expected_count=slot_count,
+        )
+        if slot_count == 1:
+            return self._generate_now(job)
+
+        try:
+            generate_cava_positions.delay(job.id)
+        except Exception:
+            logger.exception("No se pudo encolar la generación de la cava %s", cava.id)
+            job.status = active.FAILED
+            job.save(update_fields=["status", "updated_at"])
+            return Response(
+                {"detail": "No se pudo iniciar la generación."},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        return Response(
+            serializers.CavaGenerationJobSerializer(job).data,
+            status=status.HTTP_202_ACCEPTED,
+        )
+
+    def _generate_now(self, job):
+        from apps.storage.generation import generate_positions_for_cava
+
+        active = storage_models.CavaGenerationJob.Status
+        job.status = active.RUNNING
+        job.save(update_fields=["status", "updated_at"])
+        try:
+            result = generate_positions_for_cava(job.cava)
+        except Exception:
+            logger.exception("No se pudo crear la posición de la cava %s", job.cava_id)
+            job.status = active.FAILED
+            job.save(update_fields=["status", "updated_at"])
+            return Response(
+                {"detail": "No se pudieron crear las posiciones."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+        job.status = active.SUCCEEDED
+        job.expected_count = result["expected"]
+        job.created_count = result["created"]
+        job.skipped_count = result["skipped"]
+        job.save(
+            update_fields=[
+                "status",
+                "expected_count",
+                "created_count",
+                "skipped_count",
+                "updated_at",
+            ]
+        )
+        return Response(serializers.CavaGenerationJobSerializer(job).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["get"])
+    def occupancy(self, request, pk=None):
+        cava = self.get_object()
+        rows = cava.positions.order_by("hall", "rack", "place", "level").values(
+            "hall", "rack", "level", "place", "status", "is_active"
+        )
+        return Response(list(rows))
+
+    @action(detail=True, methods=["get"])
+    def generation(self, request, pk=None):
+        cava = self.get_object()
+        job = cava.generation_jobs.order_by("-id").first()
+        if job is None:
+            return Response({"status": "idle", "detail": ""})
+        return Response(serializers.CavaGenerationJobSerializer(job).data)
+
+
+class ExactOptionalFilter(django_filters.CharFilter):
+    """Filtra solo si el parámetro viene en la petición. La cadena vacía es un pasillo en blanco."""
+
+    def filter(self, qs, value):
+        data = getattr(self.parent, "data", None)
+        if data is None or self.field_name not in data:
+            return qs
+        return qs.filter(**{self.field_name: str(value or "").strip()})
+
+
+class PositionFilter(django_filters.FilterSet):
+    hall = ExactOptionalFilter(field_name="hall")
+    rack = ExactOptionalFilter(field_name="rack")
+    place = ExactOptionalFilter(field_name="place")
+
+    class Meta:
+        model = storage_models.Position
+        fields = [
+            "status",
+            "cava",
+            "is_active",
+            "is_picking",
+            "is_push",
+            "hall",
+            "rack",
+            "place",
+        ]
+
 
 class PositionViewSet(WorkspaceScopeMixin, viewsets.ModelViewSet):
     queryset = storage_models.Position.objects.all().order_by('code')
     serializer_class = serializers.PositionSerializer
     pagination_class = MediumPagination
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
-    filterset_fields = ['status', 'hall', 'cava', 'is_active', 'is_picking', 'is_push']
+    filterset_class = PositionFilter
     search_fields = ['code',]
     permission_classes = [IsAuthenticated, StrictDjangoModelPermissions]
     workspace_field = "cava__storage__workspace"

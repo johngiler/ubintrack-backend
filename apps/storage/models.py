@@ -26,6 +26,29 @@ class Storage(BaseModel):
         return self.name
 
 
+class PositionNomenclature(BaseModel):
+    """Cómo arma el código de posición este owner. Los tokens los pone cada cava."""
+
+    workspace = models.OneToOneField(
+        "workspaces.Workspace",
+        on_delete=models.CASCADE,
+        related_name="position_nomenclature",
+        verbose_name="workspace",
+    )
+    separator = models.CharField(max_length=4, default="-", verbose_name="separador")
+    cava_prefix = models.CharField(max_length=8, blank=True, default="C", verbose_name="prefijo de cava")
+    aisle_prefix = models.CharField(max_length=8, blank=True, default="P", verbose_name="prefijo de pasillo")
+    rack_prefix = models.CharField(max_length=8, blank=True, default="R", verbose_name="prefijo de rack")
+    level_prefix = models.CharField(max_length=8, blank=True, default="N", verbose_name="prefijo de nivel")
+
+    class Meta:
+        verbose_name = "nomenclatura de posiciones"
+        verbose_name_plural = "nomenclaturas de posiciones"
+
+    def __str__(self):
+        return f"Nomenclatura {self.workspace_id}"
+
+
 class Cava(BaseModel):
     storage = models.ForeignKey(
         Storage,
@@ -36,6 +59,13 @@ class Cava(BaseModel):
     )
 
     name = models.CharField(max_length=50, verbose_name='nombre de la cava')
+    code = models.CharField(
+        max_length=32,
+        blank=True,
+        default="",
+        verbose_name="código",
+        help_text="Token de la cava en la nomenclatura, sin prefijo. Ejemplo: 9 → C9.",
+    )
     condition = models.CharField(
         max_length=15, choices=choices.Conditions.choices, verbose_name='condición')
     current_temp = models.IntegerField(
@@ -60,27 +90,136 @@ class Cava(BaseModel):
         return self.name
 
 
+class CavaBlock(BaseModel):
+    """Tramo del plano de la cava, de izquierda a derecha.
+
+    Un pasillo es un hueco vacío: no genera posiciones.
+    Un rack sí: sus celdas son nivel × profundidad.
+    """
+
+    class Kind(models.TextChoices):
+        AISLE = "aisle", "Pasillo"
+        RACK = "rack", "Rack"
+
+    class Orientation(models.TextChoices):
+        HORIZONTAL = "horizontal", "Horizontal"
+        VERTICAL = "vertical", "Vertical"
+
+    class LabelSide(models.TextChoices):
+        ABOVE = "above", "Arriba"
+        BELOW = "below", "Abajo"
+
+    cava = models.ForeignKey(
+        Cava,
+        on_delete=models.CASCADE,
+        related_name="blocks",
+        verbose_name="cava",
+    )
+    sort_order = models.PositiveIntegerField(default=0, verbose_name="orden")
+    kind = models.CharField(max_length=8, choices=Kind.choices, verbose_name="tipo")
+    code = models.CharField(
+        max_length=32,
+        blank=True,
+        default="",
+        verbose_name="código",
+        help_text="Token sin prefijo. En un rack numérico, es el primero de la serie.",
+    )
+    rack_count = models.PositiveIntegerField(default=1, verbose_name="cantidad de racks")
+    levels = models.PositiveIntegerField(null=True, blank=True, verbose_name="niveles")
+    depth = models.PositiveIntegerField(null=True, blank=True, verbose_name="profundidad")
+    orientation = models.CharField(
+        max_length=12,
+        choices=Orientation.choices,
+        default=Orientation.HORIZONTAL,
+        verbose_name="orientación",
+        help_text="Horizontal pone este grupo en una fila. Vertical apila los racks.",
+    )
+    label_side = models.CharField(
+        max_length=8,
+        choices=LabelSide.choices,
+        default=LabelSide.BELOW,
+        verbose_name="lado del nombre",
+        help_text="Dónde se escribe el nombre del rack en el plano.",
+    )
+    aisle_code = models.CharField(
+        max_length=32,
+        blank=True,
+        default="",
+        verbose_name="pasillo",
+        help_text="Token del pasillo de este rack. Vacío usa el pasillo más cercano.",
+    )
+
+    class Meta:
+        verbose_name = "bloque de cava"
+        verbose_name_plural = "bloques de cava"
+        ordering = ["sort_order", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["cava", "sort_order"],
+                name="unique_cava_block_order",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.get_kind_display()} {self.code}".strip()
+
+    def rack_tokens(self) -> list[str]:
+        if self.kind != self.Kind.RACK:
+            return []
+        count = self.rack_count or 1
+        raw = (self.code or "").strip()
+        if raw.isdigit():
+            start = int(raw)
+            return [str(start + i) for i in range(count)]
+        if count == 1 and raw:
+            return [raw]
+        return []
+
+    def resolved_depth_codes(self) -> list[str]:
+        total = self.depth or 1
+        alphabet = [chr(ord("A") + i) for i in range(26)]
+        return [alphabet[i] if i < len(alphabet) else str(i + 1) for i in range(total)]
+
+
+class CavaGenerationJob(BaseModel):
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pendiente"
+        RUNNING = "running", "En proceso"
+        SUCCEEDED = "succeeded", "Listo"
+        FAILED = "failed", "Fallido"
+
+    cava = models.ForeignKey(
+        Cava,
+        on_delete=models.CASCADE,
+        related_name="generation_jobs",
+        verbose_name="cava",
+    )
+    workspace = models.ForeignKey(
+        "workspaces.Workspace",
+        on_delete=models.CASCADE,
+        related_name="cava_generation_jobs",
+        verbose_name="workspace",
+    )
+    status = models.CharField(
+        max_length=16,
+        choices=Status.choices,
+        default=Status.PENDING,
+        verbose_name="estado",
+    )
+    expected_count = models.PositiveIntegerField(default=0, verbose_name="posiciones previstas")
+    created_count = models.PositiveIntegerField(default=0, verbose_name="posiciones creadas")
+    skipped_count = models.PositiveIntegerField(default=0, verbose_name="posiciones ya existentes")
+
+    class Meta:
+        verbose_name = "generación de cava"
+        verbose_name_plural = "generaciones de cava"
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.cava_id} {self.status}"
+
+
 class Position(BaseModel):
-    PLACE_CHOICES = [
-        ('A', 'A - Adelante'),
-        ('B', 'B - Profundidad 2'),
-        ('C', 'C - Profundidad 3'),
-        ('D', 'D - Profundidad 4'),
-        ('E', 'E - Atrás'),
-    ]
-
-    RACK_CHOICES = services.generate_rack_list(17)
-
-    HALL_CHOICES = [
-        ('A', 'Pasillo A'),
-        ('B', 'Pasillo B'),
-        ('C', 'Pasillo C'),
-        ('D', 'Pasillo D'),
-        ('E', 'Pasillo E'),
-        ('F', 'Pasillo F'),
-        ('G', 'Pasillo G'),
-    ]
-
     status = models.CharField(
         max_length=15,
         choices=choices.PositionStatus.choices,
@@ -89,11 +228,9 @@ class Position(BaseModel):
     )
 
     level = models.IntegerField(default=1, verbose_name='nivel')
-    place = models.CharField(
-        max_length=1, choices=PLACE_CHOICES, verbose_name='lugar')
-    rack = models.IntegerField(choices=RACK_CHOICES, verbose_name='rack')
-    hall = models.CharField(
-        max_length=1, choices=HALL_CHOICES, verbose_name='pasillo')
+    place = models.CharField(max_length=32, verbose_name='profundidad')
+    rack = models.CharField(max_length=32, verbose_name='rack')
+    hall = models.CharField(max_length=32, blank=True, default="", verbose_name='pasillo')
     cava = models.ForeignKey(Cava, on_delete=models.CASCADE,
                              null=True, related_name="positions", verbose_name='cava')
     workspace = models.ForeignKey(
@@ -144,14 +281,25 @@ class Position(BaseModel):
             if ws_id:
                 self.workspace_id = ws_id
 
-        if not self.code:
-            cava_code = services.cava_code_prefix(self.cava.name if self.cava else "")
-            hall_code = f"P{self.hall}"
-            rack_code = f"R{self.rack}"
-            level_code = f"N{self.level}"
-            place_code = self.place
+        self.hall = str(self.hall or "").strip()
+        self.rack = str(self.rack or "").strip()
+        self.place = str(self.place or "").strip()
 
-            self.code = f"{cava_code}-{hall_code}-{rack_code}-{level_code}{place_code}"
+        if not self.code:
+            nomenclature = None
+            if self.workspace_id:
+                nomenclature = PositionNomenclature.objects.filter(
+                    workspace_id=self.workspace_id
+                ).first()
+            self.code = services.build_position_code(
+                cava_name=self.cava.name if self.cava_id and self.cava else "",
+                cava_code=self.cava.code if self.cava_id and self.cava else "",
+                hall=self.hall,
+                rack=self.rack,
+                level=self.level,
+                place=self.place,
+                nomenclature=nomenclature,
+            )
 
         qr_buffer = services.generate_qr_with_label(
             self.code, self.code, self.level)

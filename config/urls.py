@@ -51,6 +51,11 @@ urlpatterns = [
     path("api/auth/login/", core_views.CustomObtainAuthToken.as_view()),
     path("api/auth/logout/", core_views.LogoutView.as_view()),
     path("api/me/", core_views.MeProfileView.as_view()),
+    path(
+        "api/position-nomenclature/",
+        storage_views.PositionNomenclatureView.as_view(),
+        name="position-nomenclature",
+    ),
     path("api/workspace/current/", WorkspaceCurrentView.as_view(), name="workspace-current"),
     path("api/me/workspace/", WorkspaceMeView.as_view(), name="workspace-me"),
     path("api/dashboard/stats/", dashboard_views.DashboardStatsView.as_view(), name="dashboard-stats"),

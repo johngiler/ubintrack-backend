@@ -9,6 +9,7 @@ Convención:
 - .env                 → POSTGRES_*, Zebra, etc. (gitignored; ver .env.*.template).
 """
 import os
+import sys
 from pathlib import Path
 
 from corsheaders.defaults import default_headers
@@ -148,6 +149,23 @@ REST_FRAMEWORK = {
     "DEFAULT_PAGINATION_CLASS": "apps.common.pagination.StandardPagination",
     "PAGE_SIZE": 20,
 }
+
+# Celery. Redis /2 para no pisar PortPax (/0) ni el result de Publivalla (/1).
+# Channels de Ubintrack sigue en REDIS_URL (/1).
+CELERY_BROKER_URL = os.environ.get("CELERY_BROKER_URL", "redis://127.0.0.1:6379/2")
+CELERY_RESULT_BACKEND = os.environ.get("CELERY_RESULT_BACKEND", CELERY_BROKER_URL)
+CELERY_TASK_TRACK_STARTED = True
+CELERY_TASK_TIME_LIMIT = 60 * 30
+CELERY_TASK_SOFT_TIME_LIMIT = 60 * 25
+CELERY_WORKER_PREFETCH_MULTIPLIER = 1
+CELERY_ACCEPT_CONTENT = ["json"]
+CELERY_TASK_SERIALIZER = "json"
+CELERY_RESULT_SERIALIZER = "json"
+CELERY_TIMEZONE = TIME_ZONE
+# macOS crea los procesos del worker con spawn y la tarea falla al arrancar.
+# En Linux el pool sigue siendo prefork.
+if sys.platform == "darwin":
+    CELERY_WORKER_POOL = "solo"
 
 try:
     from .local_settings import *  # noqa: F403

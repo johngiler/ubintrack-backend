@@ -13,7 +13,11 @@ def update_total_levels_on_save(sender, instance, **kwargs):
 
 @receiver(post_delete, sender=models.Position)
 def update_total_levels_on_delete(sender, instance, **kwargs):
-    # After deleting a Position, update total_levels of the related Cava
-    cava = instance.cava
-    cava.total_levels = models.Position.objects.filter(cava=cava).count()
-    cava.save()
+    cava_id = instance.cava_id
+    if not cava_id:
+        return
+    cava = models.Cava.objects.filter(pk=cava_id).first()
+    if cava is None:
+        return
+    cava.total_levels = models.Position.objects.filter(cava_id=cava_id).count()
+    cava.save(update_fields=["total_levels", "updated_at"])

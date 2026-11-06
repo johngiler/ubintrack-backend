@@ -125,6 +125,53 @@ def generate_rack_list(number):
     return [(i, f'Rack {i}') for i in range(1, number + 1)]
 
 
+def build_position_code(
+    *,
+    cava_name,
+    cava_code,
+    hall,
+    rack,
+    level,
+    place,
+    nomenclature=None,
+):
+    """Arma el código con la nomenclatura del owner.
+
+    Sin nomenclatura, el resultado sigue siendo el de antes: C1-PA-R1-N1A.
+    """
+    if nomenclature is None:
+        separator = "-"
+        cava_prefix = ""
+        aisle_prefix = "P"
+        rack_prefix = "R"
+        level_prefix = "N"
+    else:
+        separator = nomenclature.separator or "-"
+        cava_prefix = nomenclature.cava_prefix or ""
+        aisle_prefix = nomenclature.aisle_prefix or ""
+        rack_prefix = nomenclature.rack_prefix or ""
+        level_prefix = nomenclature.level_prefix or ""
+
+    token = str(cava_code or "").strip()
+    if token:
+        cava_segment = f"{cava_prefix}{token}"
+    else:
+        cava_segment = cava_code_prefix(cava_name)
+
+    def segment(prefix, value):
+        raw = str(value or "").strip()
+        if not raw:
+            return ""
+        return f"{prefix}{raw}"
+
+    aisle_segment = segment(aisle_prefix, hall)
+    rack_segment = segment(rack_prefix, rack)
+    level_segment = segment(level_prefix, level)
+    depth = str(place or "").strip()
+    parts = [cava_segment, aisle_segment, rack_segment, f"{level_segment}{depth}"]
+    return separator.join(part for part in parts if part)
+
+
 def generate_position_tag_zpl(position):
     """
     Genera el código ZPL para una etiqueta de posición simplificada.
