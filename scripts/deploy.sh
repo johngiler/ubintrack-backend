@@ -135,6 +135,25 @@ else
   echo "[deploy] Daphne left running (no restart)."
 fi
 
+# Celery — optional restart (default: no). Needed when task code changes.
+# || true: con stdin no-TTY (pipes/CI), read falla y set -e abortaría el deploy.
+RESTART_CELERY=""
+read -r -p "[deploy] ¿Reiniciar celery? [y/N] " RESTART_CELERY || true
+if [[ "${RESTART_CELERY}" =~ ^[yY]$ ]]; then
+  echo "[deploy] Restarting ubintrack-celery.service..."
+  if ssh "$REMOTE_HOST" "systemctl is-enabled ubintrack-celery.service >/dev/null 2>&1"; then
+    ssh "$REMOTE_HOST" "systemctl restart ubintrack-celery.service"
+    ssh "$REMOTE_HOST" "systemctl is-active --quiet ubintrack-celery.service"
+    echo "[deploy] ubintrack-celery activo"
+  else
+    echo "[deploy] WARN: ubintrack-celery.service not installed yet."
+    echo "scp scripts/systemd/ubintrack-celery.service ubintrack-api:/tmp/"
+    echo "ssh ubintrack-api 'cp /tmp/ubintrack-celery.service /etc/systemd/system/ && systemctl daemon-reload && systemctl enable --now ubintrack-celery'"
+  fi
+else
+  echo "[deploy] Celery left running (no restart)."
+fi
+
 if ssh "$REMOTE_HOST" "systemctl is-active nginx >/dev/null 2>&1"; then
   ssh "$REMOTE_HOST" "systemctl reload nginx" || echo "[deploy] WARN: nginx reload failed"
 fi

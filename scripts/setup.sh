@@ -145,7 +145,7 @@ Deploys siguientes (solo código y reinicio de API; ver scripts/deploy.sh)
 cd "$LOCAL_BACKEND" && ./scripts/deploy.sh
 
 Nota: deploy.sh sincroniza el código Django, instala deps, migra, collectstatic y
-      reinicia ubintrack-api (y opcionalmente ubintrack-daphne). No toca nginx,
+      reinicia ubintrack-api (y pregunta si reiniciar ubintrack-daphne y ubintrack-celery). No toca nginx,
       systemd units, cron, fail2ban ni tmux. Si cambias esos archivos, vuelve a
       copiarlos aquí y ejecuta daemon-reload / reload nginx según corresponda.
 
