@@ -81,6 +81,12 @@ class Cava(BaseModel):
     is_virtual = models.BooleanField(
         default=False, verbose_name='es virtual?',
         help_text='Si es virtual, sus posiciones no se contarán en el dashboard')
+    plan_layout = models.JSONField(
+        default=dict,
+        blank=True,
+        verbose_name="plano gráfico",
+        help_text="Metadatos solo visuales: puertas, eje de profundidad. No afecta nomenclatura ni generate.",
+    )
 
     class Meta:
         verbose_name = 'cava'
@@ -93,8 +99,9 @@ class Cava(BaseModel):
 class CavaBlock(BaseModel):
     """Tramo del plano de la cava, de izquierda a derecha.
 
-    Un pasillo es un hueco vacío: no genera posiciones.
-    Un rack sí: sus celdas son nivel × profundidad.
+    Un rack genera celdas nivel × profundidad.
+    Un pasillo es hueco visual; si rack_count >= 1 genera posiciones
+    de sobre-almacenamiento (un palet por índice, sin niveles).
     """
 
     class Kind(models.TextChoices):
@@ -124,7 +131,11 @@ class CavaBlock(BaseModel):
         verbose_name="código",
         help_text="Token sin prefijo. En un rack numérico, es el primero de la serie.",
     )
-    rack_count = models.PositiveIntegerField(default=1, verbose_name="cantidad de racks")
+    rack_count = models.PositiveIntegerField(
+        default=1,
+        verbose_name="cantidad de racks",
+        help_text="En rack: cantidad de racks. En pasillo: posiciones de sobre-almacenamiento (0 = ninguna).",
+    )
     levels = models.PositiveIntegerField(null=True, blank=True, verbose_name="niveles")
     depth = models.PositiveIntegerField(null=True, blank=True, verbose_name="profundidad")
     orientation = models.CharField(
@@ -146,7 +157,7 @@ class CavaBlock(BaseModel):
         blank=True,
         default="",
         verbose_name="pasillo",
-        help_text="Token del pasillo de este rack. Vacío usa el pasillo más cercano.",
+        help_text="Token del pasillo. Vacío = heredar el contiguo; '-' = sin pasillo.",
     )
 
     class Meta:

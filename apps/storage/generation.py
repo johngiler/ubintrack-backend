@@ -3,10 +3,13 @@
 from apps.core.choices import PositionStatus
 from apps.storage.models import Cava, CavaBlock, Position
 
+# Sin pasillo explícito (no heredar vecino). Coincide con AISLE_NONE del frontend.
+AISLE_NONE = "-"
 
-def _aisle_code(blocks, index) -> str:
-    """Pasillo de un rack: el de abajo si existe; si no, el de arriba."""
-    for block in blocks[index + 1:]:
+
+def _neighbor_aisle_code(blocks, index) -> str:
+    """Pasillo contiguo: el de abajo si existe; si no, el de arriba."""
+    for block in blocks[index + 1 :]:
         if block.kind == CavaBlock.Kind.RACK:
             break
         if block.kind == CavaBlock.Kind.AISLE:
@@ -23,16 +26,39 @@ def _aisle_code(blocks, index) -> str:
     return ""
 
 
+def resolve_aisle_code(block, blocks, index) -> str:
+    """Explícito, NONE→vacío, o herencia por cercanía si aisle_code vacío."""
+    chosen = (block.aisle_code or "").strip()
+    if chosen == AISLE_NONE:
+        return ""
+    if chosen:
+        return chosen
+    return _neighbor_aisle_code(blocks, index)
+
+
+def iter_aisle_slots(block: CavaBlock):
+    """Posiciones de sobre-almacenamiento en un pasillo: hall + place 01..N."""
+    code = (block.code or "").strip()
+    count = int(block.rack_count or 0)
+    if not code or count < 1:
+        return
+    for index in range(1, count + 1):
+        yield code, "", 1, f"{index:02d}"
+
+
 def iter_slots(cava: Cava):
-    """Cada celda de rack: pasillo, rack, nivel y profundidad."""
+    """Celdas de rack (pasillo, rack, nivel, profundidad) y slots de pasillo."""
     blocks = list(cava.blocks.filter(is_active=True).order_by("sort_order", "id"))
     for index, block in enumerate(blocks):
+        if block.kind == CavaBlock.Kind.AISLE:
+            yield from iter_aisle_slots(block)
+            continue
         if block.kind != CavaBlock.Kind.RACK:
             continue
         levels = block.levels or 0
         if levels < 1:
             continue
-        aisle_code = (block.aisle_code or "").strip() or _aisle_code(blocks, index)
+        aisle_code = resolve_aisle_code(block, blocks, index)
         for rack in block.rack_tokens():
             for level in range(1, levels + 1):
                 for place in block.resolved_depth_codes():

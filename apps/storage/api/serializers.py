@@ -83,12 +83,20 @@ class CavaBlockSerializer(serializers.ModelSerializer):
 
     def validate(self, attrs):
         kind = attrs.get("kind")
+        code = str(attrs.get("code") or "").strip()
+        count = attrs.get("rack_count")
+        if count is None:
+            count = 1
+
+        if kind == storage_models.CavaBlock.Kind.AISLE:
+            if count > 0 and not code:
+                raise serializers.ValidationError("Indique el código del pasillo.")
+            return attrs
+
         if kind != storage_models.CavaBlock.Kind.RACK:
             return attrs
         levels = attrs.get("levels") or 0
         depth = attrs.get("depth") or 0
-        code = str(attrs.get("code") or "").strip()
-        count = attrs.get("rack_count") or 1
         if levels < 1 or depth < 1:
             raise serializers.ValidationError("Indique niveles y profundidad del rack.")
         if not code:
@@ -154,7 +162,11 @@ class CavaSerializer(serializers.ModelSerializer):
                     sort_order=index,
                     kind=block["kind"],
                     code=str(block.get("code") or "").strip(),
-                    rack_count=block.get("rack_count") or 1,
+                    rack_count=(
+                        int(block.get("rack_count") or 0)
+                        if block.get("kind") == storage_models.CavaBlock.Kind.AISLE
+                        else (block.get("rack_count") or 1)
+                    ),
                     levels=block.get("levels"),
                     depth=block.get("depth"),
                     orientation=block.get("orientation") or storage_models.CavaBlock.Orientation.HORIZONTAL,

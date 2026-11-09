@@ -165,7 +165,14 @@ def build_position_code(
         return f"{prefix}{raw}"
 
     aisle_segment = segment(aisle_prefix, hall)
-    rack_segment = segment(rack_prefix, rack)
+    rack_raw = str(rack or "").strip()
+    # Sobre-almacenamiento en pasillo: C9-P1-01 (sin R ni N).
+    if not rack_raw:
+        place_segment = str(place or "").strip()
+        parts = [cava_segment, aisle_segment, place_segment]
+        return separator.join(part for part in parts if part)
+
+    rack_segment = segment(rack_prefix, rack_raw)
     level_segment = segment(level_prefix, level)
     depth = str(place or "").strip()
     parts = [cava_segment, aisle_segment, rack_segment, f"{level_segment}{depth}"]
