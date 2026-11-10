@@ -75,7 +75,13 @@ class CavaViewSet(WorkspaceScopeMixin, viewsets.ModelViewSet):
     queryset = (
         storage_models.Cava.objects.select_related("storage")
         .prefetch_related("blocks")
-        .annotate(position_count=Count("positions"))
+        .annotate(
+            position_count=Count("positions"),
+            active_position_count=Count(
+                "positions",
+                filter=Q(positions__is_active=True),
+            ),
+        )
         .order_by("-created_at")
     )
     serializer_class = serializers.CavaSerializer

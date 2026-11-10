@@ -150,6 +150,7 @@ class CavaSerializer(serializers.ModelSerializer):
     )
     blocks = CavaBlockSerializer(many=True, required=False)
     slot_count = serializers.SerializerMethodField()
+    active_slot_count = serializers.SerializerMethodField()
 
     class Meta:
         model = storage_models.Cava
@@ -160,6 +161,12 @@ class CavaSerializer(serializers.ModelSerializer):
         if count is not None:
             return count
         return obj.positions.count()
+
+    def get_active_slot_count(self, obj):
+        count = getattr(obj, "active_position_count", None)
+        if count is not None:
+            return count
+        return obj.positions.filter(is_active=True).count()
 
     def validate_blocks(self, blocks):
         if blocks is None:
