@@ -82,7 +82,7 @@ class CavaViewSet(WorkspaceScopeMixin, viewsets.ModelViewSet):
                 filter=Q(positions__is_active=True),
             ),
         )
-        .order_by("-created_at")
+        .order_by("name", "id")
     )
     serializer_class = serializers.CavaSerializer
     pagination_class = MediumPagination
