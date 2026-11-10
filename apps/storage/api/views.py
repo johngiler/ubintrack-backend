@@ -94,6 +94,21 @@ class CavaViewSet(WorkspaceScopeMixin, viewsets.ModelViewSet):
     def get_queryset(self):
         return self.scope_to_workspace(super().get_queryset())
 
+    @action(detail=False, methods=["get"])
+    def totals(self, request):
+        """Suma de posiciones (activas / total) de todas las cavas del owner."""
+        cava_ids = self.filter_queryset(self.get_queryset()).values_list("id", flat=True)
+        agg = storage_models.Position.objects.filter(cava_id__in=cava_ids).aggregate(
+            total=Count("id"),
+            active=Count("id", filter=Q(is_active=True)),
+        )
+        return Response(
+            {
+                "total": agg["total"] or 0,
+                "active": agg["active"] or 0,
+            }
+        )
+
     @action(detail=True, methods=["post"])
     def generate(self, request, pk=None):
         if is_client_user(request.user):

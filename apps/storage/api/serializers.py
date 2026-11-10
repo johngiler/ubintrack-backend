@@ -194,8 +194,14 @@ class CavaSerializer(serializers.ModelSerializer):
 
     def update(self, instance, validated_data):
         blocks = validated_data.pop("blocks", None)
+        was_generated = bool(instance.positions_has_been_generated)
         cava = super().update(instance, validated_data)
         self._replace_blocks(cava, blocks)
+        # Plano ya generado: alinear posiciones (crear faltantes / borrar libres huérfanas).
+        if blocks is not None and was_generated:
+            from apps.storage.generation import sync_positions_for_cava
+
+            sync_positions_for_cava(cava)
         return cava
 
     def _replace_blocks(self, cava, blocks):

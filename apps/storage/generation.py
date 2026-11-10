@@ -79,24 +79,43 @@ def iter_slots(cava: Cava):
                     yield aisle_code, rack, level, place
 
 
-def generate_positions_for_cava(cava: Cava) -> dict:
-    """Crea solo las posiciones que faltan; no toca las ya existentes."""
+def _slot_key(hall, rack, level, place) -> tuple:
+    return (str(hall or ""), str(rack or ""), int(level or 0), str(place or ""))
+
+
+def expected_slot_keys(cava: Cava) -> set[tuple]:
+    return {_slot_key(hall, rack, level, place) for hall, rack, level, place in iter_slots(cava)}
+
+
+def sync_positions_for_cava(cava: Cava) -> dict:
+    """
+    Alinea posiciones con el plano actual:
+    - crea las que faltan
+    - elimina huérfanas libres (rack/piso quitado o reducido)
+    - no borra asignadas/ocupadas (quedan reportadas en blocked)
+    """
     workspace_id = cava.storage.workspace_id
+    expected = expected_slot_keys(cava)
+    existing = {
+        _slot_key(row.hall, row.rack, row.level, row.place): row
+        for row in cava.positions.all().only(
+            "id", "hall", "rack", "level", "place", "status", "code"
+        )
+    }
+
+    to_create = expected - existing.keys()
+    orphans = [row for key, row in existing.items() if key not in expected]
+    libre_orphans = [row for row in orphans if row.status == PositionStatus.LIBRE]
+    blocked = [row for row in orphans if row.status != PositionStatus.LIBRE]
+
+    deleted = 0
+    if libre_orphans:
+        deleted, _ = Position.objects.filter(
+            pk__in=[row.pk for row in libre_orphans]
+        ).delete()
+
     created = 0
-    skipped = 0
-    expected = 0
-    for hall, rack, level, place in iter_slots(cava):
-        expected += 1
-        exists = Position.objects.filter(
-            cava=cava,
-            hall=hall,
-            rack=rack,
-            level=level,
-            place=place,
-        ).exists()
-        if exists:
-            skipped += 1
-            continue
+    for hall, rack, level, place in to_create:
         Position.objects.create(
             cava=cava,
             workspace_id=workspace_id,
@@ -108,7 +127,21 @@ def generate_positions_for_cava(cava: Cava) -> dict:
         )
         created += 1
 
-    if expected:
+    skipped = len(existing) - len(orphans)
+    if expected or cava.positions.exists():
         cava.positions_has_been_generated = True
         cava.save(update_fields=["positions_has_been_generated", "updated_at"])
-    return {"expected": expected, "created": created, "skipped": skipped}
+
+    return {
+        "expected": len(expected),
+        "created": created,
+        "deleted": deleted,
+        "skipped": skipped,
+        "blocked": [row.code for row in blocked],
+        "blocked_count": len(blocked),
+    }
+
+
+def generate_positions_for_cava(cava: Cava) -> dict:
+    """Compat: sincroniza el plano (alta + baja de libres huérfanas)."""
+    return sync_positions_for_cava(cava)
