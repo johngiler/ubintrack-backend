@@ -37,7 +37,13 @@ class PositionNomenclature(BaseModel):
     )
     separator = models.CharField(max_length=4, default="-", verbose_name="separador")
     cava_prefix = models.CharField(max_length=8, blank=True, default="C", verbose_name="prefijo de cava")
-    aisle_prefix = models.CharField(max_length=8, blank=True, default="P", verbose_name="prefijo de pasillo")
+    aisle_prefix = models.CharField(
+        max_length=8,
+        blank=True,
+        default="",
+        verbose_name="prefijo de pasillo",
+        help_text="Obsoleto: el token del pasillo ya viene completo desde el nombre (P1, T1).",
+    )
     rack_prefix = models.CharField(max_length=8, blank=True, default="R", verbose_name="prefijo de rack")
     level_prefix = models.CharField(max_length=8, blank=True, default="N", verbose_name="prefijo de nivel")
 
@@ -124,12 +130,19 @@ class CavaBlock(BaseModel):
     )
     sort_order = models.PositiveIntegerField(default=0, verbose_name="orden")
     kind = models.CharField(max_length=8, choices=Kind.choices, verbose_name="tipo")
+    name = models.CharField(
+        max_length=64,
+        blank=True,
+        default="",
+        verbose_name="nombre",
+        help_text="Nombre visible del pasillo (ej. Pasillo 1, Tunel 1). El code se deriva de aquí.",
+    )
     code = models.CharField(
         max_length=32,
         blank=True,
         default="",
         verbose_name="código",
-        help_text="Token sin prefijo. En un rack numérico, es el primero de la serie.",
+        help_text="Token en el código de posición. En pasillo: derivado del nombre (P1). En rack: inicio de serie.",
     )
     rack_count = models.PositiveIntegerField(
         default=1,

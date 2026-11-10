@@ -2,6 +2,7 @@ from django.db import transaction
 from rest_framework import serializers
 from apps.storage import models as storage_models
 from apps.inventory import models as inventory_models
+from apps.storage.utils.aisle_token import unique_aisle_token
 
 
 class TokenField(serializers.CharField):
@@ -71,6 +72,7 @@ class CavaBlockSerializer(serializers.ModelSerializer):
             "id",
             "sort_order",
             "kind",
+            "name",
             "code",
             "rack_count",
             "levels",
@@ -84,13 +86,14 @@ class CavaBlockSerializer(serializers.ModelSerializer):
     def validate(self, attrs):
         kind = attrs.get("kind")
         code = str(attrs.get("code") or "").strip()
+        name = str(attrs.get("name") or "").strip()
         count = attrs.get("rack_count")
         if count is None:
             count = 1
 
         if kind == storage_models.CavaBlock.Kind.AISLE:
-            if count > 0 and not code:
-                raise serializers.ValidationError("Indique el código del pasillo.")
+            if not name and not code:
+                raise serializers.ValidationError("Indique el nombre del pasillo.")
             return attrs
 
         if kind != storage_models.CavaBlock.Kind.RACK:
@@ -155,27 +158,39 @@ class CavaSerializer(serializers.ModelSerializer):
             return
         with transaction.atomic():
             cava.blocks.all().delete()
-            storage_models.CavaBlock.objects.bulk_create(
-            [
-                storage_models.CavaBlock(
-                    cava=cava,
-                    sort_order=index,
-                    kind=block["kind"],
-                    code=str(block.get("code") or "").strip(),
-                    rack_count=(
-                        int(block.get("rack_count") or 0)
-                        if block.get("kind") == storage_models.CavaBlock.Kind.AISLE
-                        else (block.get("rack_count") or 1)
-                    ),
-                    levels=block.get("levels"),
-                    depth=block.get("depth"),
-                    orientation=block.get("orientation") or storage_models.CavaBlock.Orientation.HORIZONTAL,
-                    label_side=block.get("label_side") or storage_models.CavaBlock.LabelSide.BELOW,
-                    aisle_code=str(block.get("aisle_code") or "").strip(),
+            used_tokens: set[str] = set()
+            prepared = []
+            for index, block in enumerate(blocks):
+                kind = block["kind"]
+                name = str(block.get("name") or "").strip()
+                code = str(block.get("code") or "").strip()
+                if kind == storage_models.CavaBlock.Kind.AISLE:
+                    if not name:
+                        name = f"Pasillo {code}" if code.isdigit() else (code or "Pasillo")
+                    code = unique_aisle_token(name, used_tokens)
+                    used_tokens.add(code)
+                prepared.append(
+                    storage_models.CavaBlock(
+                        cava=cava,
+                        sort_order=index,
+                        kind=kind,
+                        name=name if kind == storage_models.CavaBlock.Kind.AISLE else "",
+                        code=code,
+                        rack_count=(
+                            int(block.get("rack_count") or 0)
+                            if kind == storage_models.CavaBlock.Kind.AISLE
+                            else (block.get("rack_count") or 1)
+                        ),
+                        levels=block.get("levels"),
+                        depth=block.get("depth"),
+                        orientation=block.get("orientation")
+                        or storage_models.CavaBlock.Orientation.HORIZONTAL,
+                        label_side=block.get("label_side")
+                        or storage_models.CavaBlock.LabelSide.BELOW,
+                        aisle_code=str(block.get("aisle_code") or "").strip(),
+                    )
                 )
-                for index, block in enumerate(blocks)
-            ]
-        )
+            storage_models.CavaBlock.objects.bulk_create(prepared)
 
 
 class PositionSerializer(serializers.ModelSerializer):

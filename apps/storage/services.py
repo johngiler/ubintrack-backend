@@ -142,13 +142,11 @@ def build_position_code(
     if nomenclature is None:
         separator = "-"
         cava_prefix = ""
-        aisle_prefix = "P"
         rack_prefix = "R"
         level_prefix = "N"
     else:
         separator = nomenclature.separator or "-"
         cava_prefix = nomenclature.cava_prefix or ""
-        aisle_prefix = nomenclature.aisle_prefix or ""
         rack_prefix = nomenclature.rack_prefix or ""
         level_prefix = nomenclature.level_prefix or ""
 
@@ -164,7 +162,8 @@ def build_position_code(
             return ""
         return f"{prefix}{raw}"
 
-    aisle_segment = segment(aisle_prefix, hall)
+    # Hall ya trae el token completo (P1, TT, …); no se antepone aisle_prefix.
+    aisle_segment = str(hall or "").strip()
     rack_raw = str(rack or "").strip()
     # Sobre-almacenamiento en pasillo: C9-P1-01 (sin R ni N).
     if not rack_raw:
