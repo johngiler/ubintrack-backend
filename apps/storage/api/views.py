@@ -305,6 +305,29 @@ class PositionViewSet(WorkspaceScopeMixin, viewsets.ModelViewSet):
         
         return queryset.order_by('cava__name', 'hall', 'rack', 'level', 'place')
 
+    BULK_MAX_IDS = 2000
+
+    def _parse_bulk_ids(self, request):
+        raw = request.data.get("ids") or []
+        if not isinstance(raw, list) or not raw:
+            return None, Response(
+                {"detail": "Seleccione al menos una posición."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            ids = [int(value) for value in raw]
+        except (TypeError, ValueError):
+            return None, Response(
+                {"detail": "No se pudo completar la operación."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if len(ids) > self.BULK_MAX_IDS:
+            return None, Response(
+                {"detail": f"Máximo {self.BULK_MAX_IDS} posiciones por operación."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return ids, None
+
     @action(detail=False, methods=["get"])
     def halls(self, request):
         """Tokens de sección (P1, T1, …) presentes en posiciones, opcionalmente por cava."""
@@ -320,6 +343,258 @@ class PositionViewSet(WorkspaceScopeMixin, viewsets.ModelViewSet):
         )
         return Response(
             [{"value": token, "label": token} for token in tokens if str(token).strip()]
+        )
+
+    @action(detail=False, methods=["get"])
+    def ids(self, request):
+        """IDs del listado filtrado (para seleccionar todas tras filtrar)."""
+        qs = self.filter_queryset(self.get_queryset())
+        id_list = list(qs.values_list("id", flat=True)[: self.BULK_MAX_IDS + 1])
+        if len(id_list) > self.BULK_MAX_IDS:
+            return Response(
+                {"detail": f"Máximo {self.BULK_MAX_IDS} posiciones por operación."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return Response({"ids": id_list, "count": len(id_list)})
+
+    @action(detail=False, methods=["delete"], url_path="bulk-delete")
+    def bulk_delete(self, request):
+        """Elimina en masa posiciones libres del scope del usuario."""
+        if is_client_user(request.user):
+            return Response({"detail": "No autorizado."}, status=status.HTTP_403_FORBIDDEN)
+
+        ids, error = self._parse_bulk_ids(request)
+        if error is not None:
+            return error
+
+        qs = self.scope_to_workspace(
+            storage_models.Position.objects.filter(id__in=ids)
+        )
+        found_ids = set(qs.values_list("id", flat=True))
+        missing = len(ids) - len(found_ids)
+
+        blocked_count = qs.exclude(status="libre").count()
+        deleted_count, _ = qs.filter(status="libre").delete()
+
+        parts = [f"Se eliminaron {deleted_count} posiciones."]
+        if blocked_count:
+            parts.append(f"{blocked_count} no estaban libres.")
+        if missing:
+            parts.append(f"{missing} no encontradas.")
+        return Response(
+            {
+                "success": True,
+                "deleted": deleted_count,
+                "blocked": blocked_count,
+                "message": " ".join(parts),
+            }
+        )
+
+    @staticmethod
+    def _optional_bool(data, key):
+        if key not in data:
+            return None
+        value = data.get(key)
+        if isinstance(value, bool):
+            return value
+        if value in (0, 1, "0", "1", "true", "false", "True", "False"):
+            return str(value).lower() in ("1", "true")
+        return None
+
+    @action(detail=False, methods=["post"], url_path="bulk-update-flags")
+    def bulk_update_flags(self, request):
+        """
+        Cambia is_active / is_picking / is_push en masa.
+        Reglas: inactiva → sin push/picking; push ↔ picking excluyentes;
+        push aplica al conducto completo (profundidad ≥ MIN_PUSH_DEPTH).
+        """
+        if is_client_user(request.user):
+            return Response({"detail": "No autorizado."}, status=status.HTTP_403_FORBIDDEN)
+
+        from django.core.exceptions import ValidationError as DjangoValidationError
+
+        from apps.storage.utils.conduits import set_conduit_is_push
+
+        ids, error = self._parse_bulk_ids(request)
+        if error is not None:
+            return error
+
+        is_active = self._optional_bool(request.data, "is_active")
+        is_picking = self._optional_bool(request.data, "is_picking")
+        is_push = self._optional_bool(request.data, "is_push")
+        if is_active is None and is_picking is None and is_push is None:
+            return Response(
+                {"detail": "Indique al menos un cambio."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if is_push is True and is_picking is True:
+            return Response(
+                {"detail": "Push y picking no pueden estar activos a la vez."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if is_active is False and (is_push is True or is_picking is True):
+            return Response(
+                {"detail": "Una posición inactiva no puede ser push ni picking."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        qs = self.scope_to_workspace(
+            storage_models.Position.objects.filter(id__in=ids)
+        )
+        if not qs.exists():
+            return Response(
+                {"detail": "No se encontraron posiciones."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        touched = 0
+        skipped_inactive = 0
+        conduits_ok = 0
+
+        if is_active is False:
+            touched = qs.update(is_active=False, is_picking=False, is_push=False)
+            return Response(
+                {
+                    "success": True,
+                    "updated": touched,
+                    "message": f"Se desactivaron {touched} posiciones.",
+                }
+            )
+
+        if is_active is True:
+            touched += qs.filter(is_active=False).update(is_active=True)
+
+        # Push (conducto) antes que picking si se pide apagar push / encender push.
+        if is_push is False:
+            seen = set()
+            for position in qs.iterator():
+                key = (position.cava_id, position.hall, position.rack, position.level)
+                if key in seen:
+                    continue
+                seen.add(key)
+                conduits_ok += set_conduit_is_push(position, False)
+            touched = max(touched, conduits_ok)
+
+        if is_push is True:
+            seen = set()
+            try:
+                for position in qs.iterator():
+                    key = (position.cava_id, position.hall, position.rack, position.level)
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    # Representante activo del conducto (set_conduit exige activo).
+                    sample = (
+                        qs.filter(
+                            cava_id=position.cava_id,
+                            hall=position.hall,
+                            rack=position.rack,
+                            level=position.level,
+                            is_active=True,
+                        ).first()
+                        or position
+                    )
+                    if not sample.is_active:
+                        skipped_inactive += 1
+                        continue
+                    conduits_ok += set_conduit_is_push(sample, True)
+            except DjangoValidationError as exc:
+                msg = (
+                    "; ".join(exc.messages)
+                    if hasattr(exc, "messages")
+                    else str(exc)
+                )
+                return Response({"detail": msg}, status=status.HTTP_400_BAD_REQUEST)
+            touched = max(touched, conduits_ok)
+
+        if is_picking is True:
+            # Picking apaga push en el conducto de cada seleccionada activa.
+            seen = set()
+            for position in qs.filter(is_active=True).iterator():
+                key = (position.cava_id, position.hall, position.rack, position.level)
+                if key in seen:
+                    continue
+                seen.add(key)
+                set_conduit_is_push(position, False)
+            picking_updated = qs.filter(is_active=True).update(is_picking=True)
+            skipped_inactive += qs.filter(is_active=False).count()
+            touched = max(touched, picking_updated)
+
+        if is_picking is False:
+            picking_off = qs.update(is_picking=False)
+            touched = max(touched, picking_off)
+
+        parts = [f"Se actualizaron {touched} posiciones."]
+        if skipped_inactive:
+            parts.append(f"{skipped_inactive} inactivas omitidas.")
+        return Response(
+            {
+                "success": True,
+                "updated": touched,
+                "skipped_inactive": skipped_inactive,
+                "message": " ".join(parts),
+            }
+        )
+
+    @action(detail=False, methods=["post"], url_path="bulk-print")
+    def bulk_print(self, request):
+        """Imprime etiquetas ZPL de varias posiciones."""
+        if is_client_user(request.user):
+            return Response({"detail": "No autorizado."}, status=status.HTTP_403_FORBIDDEN)
+
+        ids, error = self._parse_bulk_ids(request)
+        if error is not None:
+            return error
+
+        positions = list(
+            self.scope_to_workspace(
+                storage_models.Position.objects.filter(id__in=ids)
+            )
+            .only("id", "code", "zpl_code")
+            .order_by("cava__name", "hall", "rack", "level", "place")
+        )
+        if not positions:
+            return Response(
+                {"detail": "No se encontraron posiciones."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        skipped = [p.code for p in positions if not p.zpl_code]
+        zpl_jobs = [p.zpl_code for p in positions if p.zpl_code]
+        if not zpl_jobs:
+            return Response(
+                {
+                    "success": False,
+                    "printed": 0,
+                    "skipped": skipped,
+                    "message": "Ninguna posición tiene etiqueta para imprimir.",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Un envío con todos los ZPL (varios ^XA…^XZ) evita N conexiones.
+        if not print_to_zebra("\n".join(zpl_jobs)):
+            return Response(
+                {
+                    "success": False,
+                    "printed": 0,
+                    "skipped": skipped,
+                    "message": "Error al enviar a la impresora. Verifique la conexión.",
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        printed = len(zpl_jobs)
+        parts = [f"Se enviaron {printed} etiquetas."]
+        if skipped:
+            parts.append(f"{len(skipped)} sin ZPL.")
+        return Response(
+            {
+                "success": True,
+                "printed": printed,
+                "skipped": skipped,
+                "message": " ".join(parts),
+            }
         )
 
     @action(detail=True, methods=['post'])
