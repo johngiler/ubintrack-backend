@@ -80,13 +80,23 @@ def iter_slots(cava: Cava):
 
 
 def generate_positions_for_cava(cava: Cava) -> dict:
-    """Borra las posiciones de la cava y las vuelve a crear (nomenclatura al día)."""
+    """Crea solo las posiciones que faltan; no toca las ya existentes."""
     workspace_id = cava.storage.workspace_id
-    Position.objects.filter(cava=cava).delete()
     created = 0
+    skipped = 0
     expected = 0
     for hall, rack, level, place in iter_slots(cava):
         expected += 1
+        exists = Position.objects.filter(
+            cava=cava,
+            hall=hall,
+            rack=rack,
+            level=level,
+            place=place,
+        ).exists()
+        if exists:
+            skipped += 1
+            continue
         Position.objects.create(
             cava=cava,
             workspace_id=workspace_id,
@@ -98,6 +108,7 @@ def generate_positions_for_cava(cava: Cava) -> dict:
         )
         created += 1
 
-    cava.positions_has_been_generated = bool(expected)
-    cava.save(update_fields=["positions_has_been_generated", "updated_at"])
-    return {"expected": expected, "created": created, "skipped": 0}
+    if expected:
+        cava.positions_has_been_generated = True
+        cava.save(update_fields=["positions_has_been_generated", "updated_at"])
+    return {"expected": expected, "created": created, "skipped": skipped}

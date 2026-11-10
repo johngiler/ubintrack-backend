@@ -166,9 +166,52 @@ class CavaViewSet(WorkspaceScopeMixin, viewsets.ModelViewSet):
     def occupancy(self, request, pk=None):
         cava = self.get_object()
         rows = cava.positions.order_by("hall", "rack", "place", "level").values(
-            "hall", "rack", "level", "place", "status", "is_active"
+            "hall", "rack", "level", "place", "status", "is_active", "is_picking", "is_push"
         )
         return Response(list(rows))
+
+    @action(detail=True, methods=["post"], url_path="set_hilera_push")
+    def set_hilera_push(self, request, pk=None):
+        """Activa/desactiva is_push en todas las posiciones de una hilera (racks)."""
+        if is_client_user(request.user):
+            return Response({"detail": "No autorizado."}, status=status.HTTP_403_FORBIDDEN)
+
+        from apps.storage.utils.conduits import MIN_PUSH_DEPTH
+
+        cava = self.get_object()
+        hall = str(request.data.get("hall") or "").strip()
+        racks_raw = request.data.get("racks") or []
+        if not isinstance(racks_raw, list):
+            return Response(
+                {"detail": "No se pudo completar la operación."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        racks = [str(item).strip() for item in racks_raw if str(item).strip()]
+        if not racks:
+            return Response(
+                {"detail": "No se pudo completar la operación."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        is_push = bool(request.data.get("is_push"))
+        qs = cava.positions.filter(hall=hall, rack__in=racks)
+        if not qs.exists():
+            return Response(
+                {"detail": "No se pudo completar la operación."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if is_push:
+            shallow = (
+                qs.values("rack", "level")
+                .annotate(depth=Count("place", distinct=True))
+                .filter(depth__lt=MIN_PUSH_DEPTH)
+            )
+            if shallow.exists():
+                return Response(
+                    {"detail": f"La profundidad del conducto debe ser de al menos {MIN_PUSH_DEPTH}."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+        updated = qs.update(is_push=is_push)
+        return Response({"updated": updated, "is_push": is_push})
 
     @action(detail=True, methods=["get"])
     def generation(self, request, pk=None):
