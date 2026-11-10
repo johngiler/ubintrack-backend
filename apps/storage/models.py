@@ -180,6 +180,11 @@ class CavaBlock(BaseModel):
         verbose_name="siempre visible",
         help_text="Solo floor: mostrar posiciones aunque el plano tenga ocultas las de piso.",
     )
+    stretch_full = models.BooleanField(
+        default=True,
+        verbose_name="100% ancho",
+        help_text="Solo section: ocupar todo el eje de la hilera relacionada.",
+    )
     orientation = models.CharField(
         max_length=12,
         choices=Orientation.choices,

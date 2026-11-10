@@ -81,6 +81,7 @@ class CavaBlockSerializer(serializers.ModelSerializer):
             "depth",
             "overlap",
             "always_visible",
+            "stretch_full",
             "orientation",
             "label_side",
             "aisle_code",
@@ -207,6 +208,7 @@ class CavaSerializer(serializers.ModelSerializer):
                 depth = block.get("depth")
                 overlap = False
                 always_visible = False
+                stretch_full = False
                 if kind == storage_models.CavaBlock.Kind.SECTION:
                     if not section_type:
                         section_type = storage_models.CavaBlock.SectionType.PASILLO
@@ -215,6 +217,10 @@ class CavaSerializer(serializers.ModelSerializer):
                     code = unique_aisle_token(name, used_tokens)
                     used_tokens.add(code)
                     rack_count = 0
+                    if "stretch_full" in block:
+                        stretch_full = bool(block.get("stretch_full"))
+                    else:
+                        stretch_full = section_type == storage_models.CavaBlock.SectionType.PASILLO
                 elif kind == storage_models.CavaBlock.Kind.FLOOR:
                     section_type = ""
                     name = ""
@@ -243,6 +249,7 @@ class CavaSerializer(serializers.ModelSerializer):
                         depth=depth,
                         overlap=overlap,
                         always_visible=always_visible,
+                        stretch_full=stretch_full,
                         orientation=block.get("orientation")
                         or storage_models.CavaBlock.Orientation.HORIZONTAL,
                         label_side=block.get("label_side")
