@@ -216,7 +216,11 @@ class CavaViewSet(WorkspaceScopeMixin, viewsets.ModelViewSet):
                     {"detail": f"La profundidad del conducto debe ser de al menos {MIN_PUSH_DEPTH}."},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
-        updated = qs.update(is_push=is_push)
+            # Solo activas; push apaga picking. Inactivas sin push/picking.
+            qs.filter(is_active=False).update(is_push=False, is_picking=False)
+            updated = qs.filter(is_active=True).update(is_push=True, is_picking=False)
+        else:
+            updated = qs.update(is_push=False)
         return Response({"updated": updated, "is_push": is_push})
 
     @action(detail=True, methods=["get"])
@@ -300,6 +304,23 @@ class PositionViewSet(WorkspaceScopeMixin, viewsets.ModelViewSet):
                 queryset = backend().filter_queryset(self.request, queryset, self)
         
         return queryset.order_by('cava__name', 'hall', 'rack', 'level', 'place')
+
+    @action(detail=False, methods=["get"])
+    def halls(self, request):
+        """Tokens de sección (P1, T1, …) presentes en posiciones, opcionalmente por cava."""
+        qs = self.get_queryset()
+        cava_id = request.query_params.get("cava")
+        if cava_id:
+            qs = qs.filter(cava_id=cava_id)
+        tokens = (
+            qs.exclude(hall="")
+            .values_list("hall", flat=True)
+            .distinct()
+            .order_by("hall")
+        )
+        return Response(
+            [{"value": token, "label": token} for token in tokens if str(token).strip()]
+        )
 
     @action(detail=True, methods=['post'])
     def print(self, request, pk=None):

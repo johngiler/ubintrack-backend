@@ -327,7 +327,25 @@ class Position(BaseModel):
                 fields=['workspace', 'code'],
                 name='unique_position_code_per_workspace',
             ),
+            models.CheckConstraint(
+                check=(
+                    models.Q(is_active=True) | models.Q(is_push=False)
+                )
+                & (models.Q(is_active=True) | models.Q(is_picking=False))
+                & (models.Q(is_push=False) | models.Q(is_picking=False)),
+                name="position_flags_active_push_picking",
+            ),
         ]
+
+    def clean(self):
+        from apps.storage.utils.position_flags import validate_position_flags
+
+        super().clean()
+        validate_position_flags(
+            is_active=bool(self.is_active),
+            is_picking=bool(self.is_picking),
+            is_push=bool(self.is_push),
+        )
 
     def save(self, *args, **kwargs):
         if self.cava_id and not self.workspace_id:

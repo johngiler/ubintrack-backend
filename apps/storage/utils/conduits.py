@@ -49,9 +49,17 @@ def validate_conduit_push_depth(position: Position) -> None:
 
 def set_conduit_is_push(position: Position, is_push: bool) -> int:
     """Marca is_push en todo el conducto. Devuelve filas actualizadas."""
-    if is_push:
-        validate_conduit_push_depth(position)
-    return conduit_positions(position).update(is_push=is_push)
+    qs = conduit_positions(position)
+    if not is_push:
+        return qs.update(is_push=False)
+
+    validate_conduit_push_depth(position)
+    if not position.is_active:
+        raise ValidationError("No se puede activar push en una posición inactiva.")
+
+    # Solo activas; al activar push se apaga picking. Inactivas quedan sin push.
+    qs.filter(is_active=False).update(is_push=False, is_picking=False)
+    return qs.filter(is_active=True).update(is_push=True, is_picking=False)
 
 
 def sort_places_for_push(places: Iterable[str]) -> list[str]:

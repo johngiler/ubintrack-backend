@@ -307,6 +307,43 @@ class PositionSerializer(serializers.ModelSerializer):
         model = storage_models.Position
         exclude = ("created_by", "updated_by")
 
+    def validate(self, attrs):
+        from django.core.exceptions import ValidationError as DjangoValidationError
+
+        from apps.storage.utils.position_flags import validate_position_flags
+
+        instance = self.instance
+        is_active = attrs.get(
+            "is_active", instance.is_active if instance is not None else True
+        )
+        is_picking = attrs.get(
+            "is_picking", instance.is_picking if instance is not None else False
+        )
+        is_push = attrs.get(
+            "is_push", instance.is_push if instance is not None else False
+        )
+
+        # Al desactivar: apagar flags (sin exigirlos en el payload).
+        if not is_active:
+            attrs["is_push"] = False
+            attrs["is_picking"] = False
+            is_push = False
+            is_picking = False
+
+        try:
+            validate_position_flags(
+                is_active=bool(is_active),
+                is_picking=bool(is_picking),
+                is_push=bool(is_push),
+            )
+        except DjangoValidationError as exc:
+            if hasattr(exc, "message_dict"):
+                raise serializers.ValidationError(exc.message_dict) from exc
+            raise serializers.ValidationError(
+                "; ".join(exc.messages) if hasattr(exc, "messages") else str(exc)
+            ) from exc
+        return attrs
+
     def _sync_conduit_is_push(self, position, is_push: bool):
         from django.core.exceptions import ValidationError as DjangoValidationError
 
@@ -322,17 +359,21 @@ class PositionSerializer(serializers.ModelSerializer):
         # No marcar push en la fila hasta validar profundidad del conducto.
         is_push = validated_data.pop("is_push", False)
         validated_data["is_push"] = False
+        if not validated_data.get("is_active", True):
+            validated_data["is_picking"] = False
         position = super().create(validated_data)
         if is_push:
             self._sync_conduit_is_push(position, True)
-            position.is_push = True
+            position.refresh_from_db(fields=["is_push", "is_picking"])
         return position
 
     def update(self, instance, validated_data):
         sync_push = "is_push" in validated_data
         is_push = validated_data.pop("is_push") if sync_push else None
+        # Si se activa picking con push previo: validate ya bloqueó; si se activa push,
+        # el sync de conducto apaga picking en el conducto.
         position = super().update(instance, validated_data)
         if sync_push:
             self._sync_conduit_is_push(position, is_push)
-            position.is_push = is_push
+            position.refresh_from_db(fields=["is_push", "is_picking"])
         return position
