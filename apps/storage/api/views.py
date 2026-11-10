@@ -193,6 +193,7 @@ class PositionFilter(django_filters.FilterSet):
     hall = ExactOptionalFilter(field_name="hall")
     rack = ExactOptionalFilter(field_name="rack")
     place = ExactOptionalFilter(field_name="place")
+    place_in = django_filters.BaseInFilter(field_name="place", lookup_expr="in")
 
     class Meta:
         model = storage_models.Position

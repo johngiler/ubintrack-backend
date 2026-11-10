@@ -165,7 +165,7 @@ def build_position_code(
     # Hall ya trae el token completo (P1, TT, …); no se antepone aisle_prefix.
     aisle_segment = str(hall or "").strip()
     rack_raw = str(rack or "").strip()
-    # Sobre-almacenamiento en pasillo: C9-P1-01 (sin R ni N).
+    # Posiciones de piso: C9-P1-P2-01 (sin R ni N).
     if not rack_raw:
         place_segment = str(place or "").strip()
         parts = [cava_segment, aisle_segment, place_segment]

@@ -103,16 +103,22 @@ class Cava(BaseModel):
 
 
 class CavaBlock(BaseModel):
-    """Tramo del plano de la cava, de izquierda a derecha.
+    """Tramo del plano de la cava.
 
-    Un rack genera celdas nivel × profundidad.
-    Un pasillo es hueco visual; si rack_count >= 1 genera posiciones
-    de sobre-almacenamiento (un palet por índice, sin niveles).
+    - rack: celdas nivel × profundidad.
+    - section: pasillo / túnel / división (nombre → token de nomenclatura).
+    - floor: posiciones de piso (sobre-almacenamiento); hall = tokens de secciones vecinas.
     """
 
     class Kind(models.TextChoices):
-        AISLE = "aisle", "Pasillo"
         RACK = "rack", "Rack"
+        SECTION = "section", "Sección"
+        FLOOR = "floor", "Piso"
+
+    class SectionType(models.TextChoices):
+        PASILLO = "pasillo", "Pasillo"
+        TUNEL = "tunel", "Túnel"
+        DIVISION = "division", "División"
 
     class Orientation(models.TextChoices):
         HORIZONTAL = "horizontal", "Horizontal"
@@ -130,27 +136,50 @@ class CavaBlock(BaseModel):
     )
     sort_order = models.PositiveIntegerField(default=0, verbose_name="orden")
     kind = models.CharField(max_length=8, choices=Kind.choices, verbose_name="tipo")
+    section_type = models.CharField(
+        max_length=12,
+        choices=SectionType.choices,
+        blank=True,
+        default="",
+        verbose_name="tipo de sección",
+        help_text="Solo section: pasillo, tunel o division.",
+    )
     name = models.CharField(
         max_length=64,
         blank=True,
         default="",
         verbose_name="nombre",
-        help_text="Nombre visible del pasillo (ej. Pasillo 1, Tunel 1). El code se deriva de aquí.",
+        help_text="Nombre visible de la sección (ej. Pasillo 1, Tunel 1, Linea 1). El code se deriva de aquí.",
     )
     code = models.CharField(
         max_length=32,
         blank=True,
         default="",
         verbose_name="código",
-        help_text="Token en el código de posición. En pasillo: derivado del nombre (P1). En rack: inicio de serie.",
+        help_text="Token en el código de posición. En sección: derivado del nombre (P1). En rack: inicio de serie.",
     )
     rack_count = models.PositiveIntegerField(
         default=1,
-        verbose_name="cantidad de racks",
-        help_text="En rack: cantidad de racks. En pasillo: posiciones de sobre-almacenamiento (0 = ninguna).",
+        verbose_name="cantidad",
+        help_text="En rack: cantidad de racks. En floor: posiciones de piso. En section: 0.",
     )
     levels = models.PositiveIntegerField(null=True, blank=True, verbose_name="niveles")
-    depth = models.PositiveIntegerField(null=True, blank=True, verbose_name="profundidad")
+    depth = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        verbose_name="profundidad",
+        help_text="En rack: profundidades A..N. En floor: cuántas posiciones caben por grupo (dimensión).",
+    )
+    overlap = models.BooleanField(
+        default=False,
+        verbose_name="solapar",
+        help_text="Solo floor: dibujar las posiciones sobre la sección (pasillo/túnel) vecina.",
+    )
+    always_visible = models.BooleanField(
+        default=False,
+        verbose_name="siempre visible",
+        help_text="Solo floor: mostrar posiciones aunque el plano tenga ocultas las de piso.",
+    )
     orientation = models.CharField(
         max_length=12,
         choices=Orientation.choices,
@@ -170,7 +199,7 @@ class CavaBlock(BaseModel):
         blank=True,
         default="",
         verbose_name="pasillo",
-        help_text="Token del pasillo. Vacío = heredar el contiguo; '-' = sin pasillo.",
+        help_text="Token de sección ligada al rack. Vacío = heredar el contiguo; '-' = sin sección.",
     )
 
     class Meta:

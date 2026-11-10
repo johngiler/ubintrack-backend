@@ -3,6 +3,7 @@ from rest_framework import serializers
 from apps.storage import models as storage_models
 from apps.inventory import models as inventory_models
 from apps.storage.utils.aisle_token import unique_aisle_token
+from apps.storage.utils.floor_neighbors import floor_is_active, section_neighbors
 
 
 class TokenField(serializers.CharField):
@@ -21,7 +22,7 @@ class TokenField(serializers.CharField):
 class StorageSimpleSerializer(serializers.ModelSerializer):
     class Meta:
         model = storage_models.Storage
-        fields = ['id', 'name']
+        fields = ["id", "name"]
 
 
 class CavaSimpleSerializer(serializers.ModelSerializer):
@@ -29,7 +30,7 @@ class CavaSimpleSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = storage_models.Cava
-        fields = ['id', 'name', 'code', 'condition', 'storage', 'current_temp']
+        fields = ["id", "name", "code", "condition", "storage", "current_temp"]
 
 
 class StorageSerializer(serializers.ModelSerializer):
@@ -72,11 +73,14 @@ class CavaBlockSerializer(serializers.ModelSerializer):
             "id",
             "sort_order",
             "kind",
+            "section_type",
             "name",
             "code",
             "rack_count",
             "levels",
             "depth",
+            "overlap",
+            "always_visible",
             "orientation",
             "label_side",
             "aisle_code",
@@ -91,9 +95,24 @@ class CavaBlockSerializer(serializers.ModelSerializer):
         if count is None:
             count = 1
 
-        if kind == storage_models.CavaBlock.Kind.AISLE:
+        if kind == storage_models.CavaBlock.Kind.SECTION:
+            section_type = attrs.get("section_type") or storage_models.CavaBlock.SectionType.PASILLO
+            attrs["section_type"] = section_type
             if not name and not code:
-                raise serializers.ValidationError("Indique el nombre del pasillo.")
+                raise serializers.ValidationError("Indique el nombre de la sección.")
+            return attrs
+
+        if kind == storage_models.CavaBlock.Kind.FLOOR:
+            if count < 1:
+                raise serializers.ValidationError("Indique la cantidad de posiciones de piso.")
+            across = attrs.get("depth")
+            if across is None:
+                attrs["depth"] = 3
+            else:
+                across = int(across or 0)
+                if across < 1:
+                    raise serializers.ValidationError("Indique la dimensión (por grupo).")
+                attrs["depth"] = across
             return attrs
 
         if kind != storage_models.CavaBlock.Kind.RACK:
@@ -141,6 +160,24 @@ class CavaSerializer(serializers.ModelSerializer):
             return count
         return obj.positions.count()
 
+    def validate_blocks(self, blocks):
+        if blocks is None:
+            return blocks
+        for index, block in enumerate(blocks):
+            if block.get("kind") != storage_models.CavaBlock.Kind.FLOOR:
+                continue
+            neighbors = section_neighbors(blocks, index)
+            if not floor_is_active(neighbors):
+                raise serializers.ValidationError(
+                    "Las posiciones de piso requieren una sección vecina con nombre."
+                )
+            count = int(block.get("rack_count") or 0)
+            if count < 1:
+                raise serializers.ValidationError(
+                    "Indique la cantidad de posiciones de piso."
+                )
+        return blocks
+
     def create(self, validated_data):
         blocks = validated_data.pop("blocks", None)
         cava = super().create(validated_data)
@@ -164,25 +201,48 @@ class CavaSerializer(serializers.ModelSerializer):
                 kind = block["kind"]
                 name = str(block.get("name") or "").strip()
                 code = str(block.get("code") or "").strip()
-                if kind == storage_models.CavaBlock.Kind.AISLE:
+                section_type = str(block.get("section_type") or "").strip()
+                rack_count = block.get("rack_count")
+
+                depth = block.get("depth")
+                overlap = False
+                always_visible = False
+                if kind == storage_models.CavaBlock.Kind.SECTION:
+                    if not section_type:
+                        section_type = storage_models.CavaBlock.SectionType.PASILLO
                     if not name:
-                        name = f"Pasillo {code}" if code.isdigit() else (code or "Pasillo")
+                        name = f"Sección {code}" if code else "Sección"
                     code = unique_aisle_token(name, used_tokens)
                     used_tokens.add(code)
+                    rack_count = 0
+                elif kind == storage_models.CavaBlock.Kind.FLOOR:
+                    section_type = ""
+                    name = ""
+                    code = ""
+                    rack_count = int(rack_count or 0)
+                    depth = int(depth or 3)
+                    if depth < 1:
+                        depth = 3
+                    overlap = bool(block.get("overlap"))
+                    always_visible = bool(block.get("always_visible"))
+                else:
+                    section_type = ""
+                    name = ""
+                    rack_count = rack_count or 1
+
                 prepared.append(
                     storage_models.CavaBlock(
                         cava=cava,
                         sort_order=index,
                         kind=kind,
-                        name=name if kind == storage_models.CavaBlock.Kind.AISLE else "",
+                        section_type=section_type,
+                        name=name,
                         code=code,
-                        rack_count=(
-                            int(block.get("rack_count") or 0)
-                            if kind == storage_models.CavaBlock.Kind.AISLE
-                            else (block.get("rack_count") or 1)
-                        ),
+                        rack_count=rack_count,
                         levels=block.get("levels"),
-                        depth=block.get("depth"),
+                        depth=depth,
+                        overlap=overlap,
+                        always_visible=always_visible,
                         orientation=block.get("orientation")
                         or storage_models.CavaBlock.Orientation.HORIZONTAL,
                         label_side=block.get("label_side")
@@ -196,7 +256,7 @@ class CavaSerializer(serializers.ModelSerializer):
 class PositionSerializer(serializers.ModelSerializer):
     cava = CavaSimpleSerializer(read_only=True)
     cava_id = serializers.PrimaryKeyRelatedField(
-        source='cava', queryset=storage_models.Cava.objects.all(), write_only=True
+        source="cava", queryset=storage_models.Cava.objects.all(), write_only=True
     )
     hall = TokenField(max_length=32, allow_blank=True, required=False)
     rack = TokenField(max_length=32)
@@ -217,12 +277,11 @@ class PositionSerializer(serializers.ModelSerializer):
 
         class Meta:
             model = inventory_models.Bin
-            fields = ['id', 'code', 'status',
-                      'dispatched_date', 'client', 'entry_code']
+            fields = ["id", "code", "status", "dispatched_date", "client", "entry_code"]
 
         def get_client(self, obj):
             if obj.client:
-                return {'id': obj.client_id, 'name': obj.client.name}
+                return {"id": obj.client_id, "name": obj.client.name}
             return None
 
         def get_entry_code(self, obj):
@@ -232,7 +291,7 @@ class PositionSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = storage_models.Position
-        exclude = ('created_by', 'updated_by')
+        exclude = ("created_by", "updated_by")
 
     def _sync_conduit_is_push(self, position, is_push: bool):
         from django.core.exceptions import ValidationError as DjangoValidationError

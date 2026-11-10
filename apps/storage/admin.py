@@ -34,7 +34,18 @@ class CavaAdmin(admin.ModelAdmin):
 
 @admin.register(models.CavaBlock)
 class CavaBlockAdmin(admin.ModelAdmin):
-    list_display = ("cava", "sort_order", "kind", "name", "code", "rack_count", "levels", "depth", "orientation")
+    list_display = (
+        "cava",
+        "sort_order",
+        "kind",
+        "section_type",
+        "name",
+        "code",
+        "rack_count",
+        "levels",
+        "depth",
+        "orientation",
+    )
     list_filter = ("kind",)
     autocomplete_fields = ("cava",)
 

@@ -2,27 +2,36 @@
 
 from apps.core.choices import PositionStatus
 from apps.storage.models import Cava, CavaBlock, Position
+from apps.storage.utils.floor_neighbors import (
+    floor_hall_token,
+    floor_is_active,
+    section_neighbors,
+)
 
-# Sin pasillo explícito (no heredar vecino). Coincide con AISLE_NONE del frontend.
+# Sin sección explícita (no heredar vecino). Coincide con AISLE_NONE del frontend.
 AISLE_NONE = "-"
 
 
-def _neighbor_aisle_code(blocks, index) -> str:
-    """Pasillo contiguo: el de abajo si existe; si no, el de arriba."""
+def _neighbor_section_code(blocks, index) -> str:
+    """Sección contigua: la de abajo si existe; si no, la de arriba."""
     for block in blocks[index + 1 :]:
         if block.kind == CavaBlock.Kind.RACK:
             break
-        if block.kind == CavaBlock.Kind.AISLE:
+        if block.kind == CavaBlock.Kind.SECTION:
             code = (block.code or "").strip()
             if code:
                 return code
+        if block.kind == CavaBlock.Kind.FLOOR:
+            continue
     for block in reversed(blocks[:index]):
         if block.kind == CavaBlock.Kind.RACK:
             break
-        if block.kind == CavaBlock.Kind.AISLE:
+        if block.kind == CavaBlock.Kind.SECTION:
             code = (block.code or "").strip()
             if code:
                 return code
+        if block.kind == CavaBlock.Kind.FLOOR:
+            continue
     return ""
 
 
@@ -33,25 +42,30 @@ def resolve_aisle_code(block, blocks, index) -> str:
         return ""
     if chosen:
         return chosen
-    return _neighbor_aisle_code(blocks, index)
+    return _neighbor_section_code(blocks, index)
 
 
-def iter_aisle_slots(block: CavaBlock):
-    """Posiciones de sobre-almacenamiento en un pasillo: hall + place 01..N."""
-    code = (block.code or "").strip()
-    count = int(block.rack_count or 0)
-    if not code or count < 1:
+def iter_floor_slots(block: CavaBlock, blocks, index: int):
+    """Posiciones de piso: hall compuesto de secciones vecinas + place 01..N."""
+    neighbors = section_neighbors(blocks, index)
+    if not floor_is_active(neighbors):
         return
-    for index in range(1, count + 1):
-        yield code, "", 1, f"{index:02d}"
+    hall = floor_hall_token(neighbors)
+    count = int(block.rack_count or 0)
+    if not hall or count < 1:
+        return
+    for place_index in range(1, count + 1):
+        yield hall, "", 1, f"{place_index:02d}"
 
 
 def iter_slots(cava: Cava):
-    """Celdas de rack (pasillo, rack, nivel, profundidad) y slots de pasillo."""
+    """Celdas de rack y slots de piso."""
     blocks = list(cava.blocks.filter(is_active=True).order_by("sort_order", "id"))
     for index, block in enumerate(blocks):
-        if block.kind == CavaBlock.Kind.AISLE:
-            yield from iter_aisle_slots(block)
+        if block.kind == CavaBlock.Kind.FLOOR:
+            yield from iter_floor_slots(block, blocks, index)
+            continue
+        if block.kind == CavaBlock.Kind.SECTION:
             continue
         if block.kind != CavaBlock.Kind.RACK:
             continue
@@ -66,22 +80,13 @@ def iter_slots(cava: Cava):
 
 
 def generate_positions_for_cava(cava: Cava) -> dict:
+    """Borra las posiciones de la cava y las vuelve a crear (nomenclatura al día)."""
     workspace_id = cava.storage.workspace_id
+    Position.objects.filter(cava=cava).delete()
     created = 0
-    skipped = 0
     expected = 0
     for hall, rack, level, place in iter_slots(cava):
         expected += 1
-        exists = Position.objects.filter(
-            cava=cava,
-            hall=hall,
-            rack=rack,
-            level=level,
-            place=place,
-        ).exists()
-        if exists:
-            skipped += 1
-            continue
         Position.objects.create(
             cava=cava,
             workspace_id=workspace_id,
@@ -93,7 +98,6 @@ def generate_positions_for_cava(cava: Cava) -> dict:
         )
         created += 1
 
-    if expected:
-        cava.positions_has_been_generated = True
-        cava.save(update_fields=["positions_has_been_generated", "updated_at"])
-    return {"expected": expected, "created": created, "skipped": skipped}
+    cava.positions_has_been_generated = bool(expected)
+    cava.save(update_fields=["positions_has_been_generated", "updated_at"])
+    return {"expected": expected, "created": created, "skipped": 0}
