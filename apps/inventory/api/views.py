@@ -73,6 +73,7 @@ class BinViewSet(ClientScopeMixin, viewsets.ModelViewSet):
     search_fields = [
         'code', 'bin_products__entry_product__product__client_sku']
     permission_classes = [IsAuthenticated, StrictDjangoModelPermissions]
+    BULK_MAX_IDS = 2000
 
     def get_queryset(self):
         return self.scope_to_user(super().get_queryset()).distinct()
@@ -90,9 +91,234 @@ class BinViewSet(ClientScopeMixin, viewsets.ModelViewSet):
             for backend in self.filter_backends:
                 if backend != filters.SearchFilter:
                     queryset = backend().filter_queryset(self.request, queryset, self)
-            return queryset
-        # Para otras búsquedas, usar el comportamiento normal
-        return super().filter_queryset(queryset)
+        else:
+            queryset = super().filter_queryset(queryset)
+
+        has_position = (self.request.query_params.get("has_position") or "").strip().lower()
+        if has_position in ("true", "1", "yes"):
+            queryset = queryset.filter(position__isnull=False)
+        elif has_position in ("false", "0", "no"):
+            queryset = queryset.filter(position__isnull=True)
+        return queryset
+
+    def _parse_bulk_ids(self, request):
+        raw = request.data.get("ids") or []
+        if not isinstance(raw, list) or not raw:
+            return None, Response(
+                {"detail": "Seleccione al menos un bin."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            ids = [int(value) for value in raw]
+        except (TypeError, ValueError):
+            return None, Response(
+                {"detail": "No se pudo completar la operación."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if len(ids) > self.BULK_MAX_IDS:
+            return None, Response(
+                {"detail": f"Máximo {self.BULK_MAX_IDS} bins por operación."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return ids, None
+
+    @staticmethod
+    def _optional_bool(data, key):
+        if key not in data:
+            return None
+        value = data.get(key)
+        if isinstance(value, bool):
+            return value
+        if value in (0, 1, "0", "1", "true", "false", "True", "False"):
+            return str(value).lower() in ("1", "true")
+        return None
+
+    @action(detail=False, methods=["get"])
+    def ids(self, request):
+        """IDs del listado filtrado (para seleccionar todas tras filtrar)."""
+        qs = self.filter_queryset(self.get_queryset())
+        id_list = list(qs.values_list("id", flat=True)[: self.BULK_MAX_IDS + 1])
+        if len(id_list) > self.BULK_MAX_IDS:
+            return Response(
+                {"detail": f"Máximo {self.BULK_MAX_IDS} bins por operación."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return Response({"ids": id_list, "count": len(id_list)})
+
+    @action(detail=False, methods=["delete"], url_path="bulk-delete")
+    def bulk_delete(self, request):
+        """Elimina bins en masa respetando las mismas reglas que el destroy unitario."""
+        if is_client_user(request.user):
+            return Response({"detail": "No autorizado."}, status=status.HTTP_403_FORBIDDEN)
+
+        from apps.order.models import ExitProduct
+        from apps.storage.models import Position
+        from django.utils import timezone
+
+        ids, error = self._parse_bulk_ids(request)
+        if error is not None:
+            return error
+
+        qs = self.scope_to_user(
+            inventory_models.Bin.objects.filter(id__in=ids)
+        ).distinct()
+        found_ids = set(qs.values_list("id", flat=True))
+        missing = len(ids) - len(found_ids)
+
+        blocked = 0
+        deleted = 0
+        for bin_obj in qs.iterator():
+            if bin_obj.status == choices.BinStatus.ALMACENADO:
+                has_exit_products = ExitProduct.objects.filter(
+                    bin_product__bin=bin_obj,
+                    exit_product_group__exit__status__in=["pendiente", "en_progreso"],
+                ).exists()
+                if has_exit_products:
+                    blocked += 1
+                    continue
+            if bin_obj.position_id:
+                Position.objects.filter(pk=bin_obj.position_id).update(
+                    status=choices.PositionStatus.LIBRE,
+                    updated_at=timezone.now(),
+                )
+            bin_obj.delete()
+            deleted += 1
+
+        parts = [f"Se eliminaron {deleted} bins."]
+        if blocked:
+            parts.append(f"{blocked} con salidas asociadas.")
+        if missing:
+            parts.append(f"{missing} no encontrados.")
+        return Response(
+            {
+                "success": True,
+                "deleted": deleted,
+                "blocked": blocked,
+                "message": " ".join(parts),
+            }
+        )
+
+    @action(detail=False, methods=["post"], url_path="bulk-update-flags")
+    def bulk_update_flags(self, request):
+        """Activa / desactiva bins en masa (solo is_active)."""
+        if is_client_user(request.user):
+            return Response({"detail": "No autorizado."}, status=status.HTTP_403_FORBIDDEN)
+
+        from apps.order.models import ExitProduct
+
+        ids, error = self._parse_bulk_ids(request)
+        if error is not None:
+            return error
+
+        is_active = self._optional_bool(request.data, "is_active")
+        if is_active is None:
+            return Response(
+                {"detail": "Indique el estado activo/inactivo."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        qs = self.scope_to_user(
+            inventory_models.Bin.objects.filter(id__in=ids)
+        ).distinct()
+        if not qs.exists():
+            return Response(
+                {"detail": "No se encontraron bins."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        updated = 0
+        blocked = 0
+        if is_active is True:
+            updated = qs.filter(is_active=False).update(is_active=True)
+        else:
+            for bin_obj in qs.filter(is_active=True).iterator():
+                if bin_obj.status == choices.BinStatus.ALMACENADO:
+                    has_exit_products = ExitProduct.objects.filter(
+                        bin_product__bin=bin_obj,
+                        exit_product_group__exit__status__in=[
+                            "pendiente",
+                            "en_progreso",
+                        ],
+                    ).exists()
+                    if has_exit_products:
+                        blocked += 1
+                        continue
+                inventory_models.Bin.objects.filter(pk=bin_obj.pk).update(
+                    is_active=False
+                )
+                updated += 1
+
+        parts = [
+            f"Se {'activaron' if is_active else 'desactivaron'} {updated} bins."
+        ]
+        if blocked:
+            parts.append(f"{blocked} con salidas asociadas.")
+        return Response(
+            {
+                "success": True,
+                "updated": updated,
+                "blocked": blocked,
+                "message": " ".join(parts),
+            }
+        )
+
+    @action(detail=False, methods=["post"], url_path="bulk-print")
+    def bulk_print(self, request):
+        """Imprime etiquetas ZPL de varios bins."""
+        if is_client_user(request.user):
+            return Response({"detail": "No autorizado."}, status=status.HTTP_403_FORBIDDEN)
+
+        ids, error = self._parse_bulk_ids(request)
+        if error is not None:
+            return error
+
+        bins = list(
+            self.scope_to_user(inventory_models.Bin.objects.filter(id__in=ids))
+            .distinct()
+            .only("id", "code", "zpl_code")
+            .order_by("code")
+        )
+        if not bins:
+            return Response(
+                {"detail": "No se encontraron bins."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        skipped = [b.code for b in bins if not b.zpl_code]
+        zpl_jobs = [b.zpl_code for b in bins if b.zpl_code]
+        if not zpl_jobs:
+            return Response(
+                {
+                    "success": False,
+                    "printed": 0,
+                    "skipped": skipped,
+                    "message": "Ningún bin tiene etiqueta para imprimir.",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if not print_to_zebra("\n".join(zpl_jobs)):
+            return Response(
+                {
+                    "success": False,
+                    "printed": 0,
+                    "skipped": skipped,
+                    "message": "Error al enviar a la impresora. Verifique la conexión.",
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        parts = [f"Se enviaron {len(zpl_jobs)} etiquetas."]
+        if skipped:
+            parts.append(f"{len(skipped)} sin ZPL.")
+        return Response(
+            {
+                "success": True,
+                "printed": len(zpl_jobs),
+                "skipped": skipped,
+                "message": " ".join(parts),
+            }
+        )
 
     def perform_create(self, serializer):
         user = self.request.user
@@ -242,7 +468,8 @@ class BinViewSet(ClientScopeMixin, viewsets.ModelViewSet):
 
         # Prefetch related data to optimize queries
         queryset = queryset.select_related(
-            'client').prefetch_related('bin_products__entry_product__product')
+            'client', 'entry', 'position'
+        ).prefetch_related('bin_products__entry_product__product')
 
         # Generate Excel file
         output = export_bin_entries_excel(queryset)

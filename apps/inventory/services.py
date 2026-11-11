@@ -389,12 +389,15 @@ def export_bin_entries_excel(bins_queryset):
     columns = [
         'Fecha de Creación',
         'Código',
+        'LPN',
+        'Código de barras',
         'Cliente',
         'Entrada',
         'Salida',
         'Posición',
         'SKU',
         'Condición',
+        'Fecha de Producción',
         'Fecha de Vencimiento',
         'Productos',
         'Cantidad Total',
@@ -403,7 +406,7 @@ def export_bin_entries_excel(bins_queryset):
         'UOM',
         'Lote',
         'Estado',
-        'Fecha de Despachado'
+        'Fecha de Despachado',
     ]
 
     row_num = 0
@@ -492,6 +495,7 @@ def export_bin_entries_excel(bins_queryset):
         # Get separate lists for each field
         product_skus_list = []
         conditions_list = []
+        production_dates_list = []
         expiration_dates_list = []
         products_list = []
         quantities_list = []
@@ -508,6 +512,16 @@ def export_bin_entries_excel(bins_queryset):
             # Condition
             condition = bep.entry_product.product.condition if bep.entry_product and bep.entry_product.product else "N/A"
             conditions_list.append(condition or "N/A")
+
+            # Production date (EntryProduct)
+            prod_date = (
+                bep.entry_product.production_date
+                if bep.entry_product and bep.entry_product.production_date
+                else None
+            )
+            production_dates_list.append(
+                prod_date.strftime('%d/%m/%Y') if prod_date else "N/A"
+            )
 
             # Expiration date
             if bep.expiration_date:
@@ -550,6 +564,7 @@ def export_bin_entries_excel(bins_queryset):
         # Convert lists to strings separated by line breaks
         product_skus_str = "\n".join(product_skus_list)
         conditions_str = "\n".join(conditions_list)
+        production_dates_str = "\n".join(production_dates_list)
         expiration_dates_str = "\n".join(expiration_dates_list)
         products_str = "\n".join(products_list)
         quantities_str = "\n".join(quantities_list)
@@ -573,29 +588,32 @@ def export_bin_entries_excel(bins_queryset):
             dispatched_date_str = bin.dispatched_date.strftime(
                 '%d/%m/%Y %H:%M')
 
-        # Write columns in the new order:
-        # 0: Fecha de Creación, 1: Código, 2: Cliente, 3: Entrada, 4: Salida,
-        # 5: Posición, 6: SKU, 7: Condición, 8: Fecha de Vencimiento, 9: Productos,
-        # 10: Cantidad Total, 11: Cantidad Reservada, 12: Cantidad Disponible, 13: UOM, 14: Lote,
-        # 15: Estado, 16: Fecha de Despachado
         ws.write(row_num, 0, created_date_str, data_style)
         ws.write(row_num, 1, bin.code, data_style)
+        ws.write(row_num, 2, bin.lpn or "", data_style)
+        ws.write(row_num, 3, bin.barcode or "", data_style)
         ws.write(
-            row_num, 2, bin.client.name if bin.client else "N/A", data_style)
-        ws.write(row_num, 3, bin.entry.code, data_style)
-        ws.write(row_num, 4, exit_codes_str, data_style)
-        ws.write(row_num, 5, position_str, data_style)
-        ws.write(row_num, 6, product_skus_str, data_style)
-        ws.write(row_num, 7, conditions_str, data_style)
-        ws.write(row_num, 8, expiration_dates_str, data_style)
-        ws.write(row_num, 9, products_str, data_style)
-        ws.write(row_num, 10, quantities_str, data_style)
-        ws.write(row_num, 11, reserved_quantities_str, data_style)
-        ws.write(row_num, 12, available_quantities_str, data_style)
-        ws.write(row_num, 13, uoms_str, data_style)
-        ws.write(row_num, 14, batches_str, data_style)
-        ws.write(row_num, 15, bin.get_status_display(), data_style)
-        ws.write(row_num, 16, dispatched_date_str, data_style)
+            row_num, 4, bin.client.name if bin.client else "N/A", data_style)
+        ws.write(
+            row_num,
+            5,
+            bin.entry.code if bin.entry_id else "N/A",
+            data_style,
+        )
+        ws.write(row_num, 6, exit_codes_str, data_style)
+        ws.write(row_num, 7, position_str, data_style)
+        ws.write(row_num, 8, product_skus_str, data_style)
+        ws.write(row_num, 9, conditions_str, data_style)
+        ws.write(row_num, 10, production_dates_str, data_style)
+        ws.write(row_num, 11, expiration_dates_str, data_style)
+        ws.write(row_num, 12, products_str, data_style)
+        ws.write(row_num, 13, quantities_str, data_style)
+        ws.write(row_num, 14, reserved_quantities_str, data_style)
+        ws.write(row_num, 15, available_quantities_str, data_style)
+        ws.write(row_num, 16, uoms_str, data_style)
+        ws.write(row_num, 17, batches_str, data_style)
+        ws.write(row_num, 18, bin.get_status_display(), data_style)
+        ws.write(row_num, 19, dispatched_date_str, data_style)
 
     # Adjust column widths
     for col_num in range(len(columns)):

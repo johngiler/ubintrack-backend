@@ -60,6 +60,11 @@ class Command(BaseCommand):
             help="Valida y reporta sin crear registros",
         )
         parser.add_argument(
+            "--no-upsert",
+            action="store_true",
+            help="Abortar si el import ya existe (no actualizar)",
+        )
+        parser.add_argument(
             "--report",
             type=str,
             default=str(
@@ -77,6 +82,7 @@ class Command(BaseCommand):
         xlsx = options.get("from_xlsx")
         parse_only = options["parse_only"]
         dry_run = options["dry_run"]
+        upsert = not options["no_upsert"]
         report_path = Path(options["report"])
 
         if xlsx:
@@ -103,17 +109,19 @@ class Command(BaseCommand):
             )
 
         data = load_rows_from_json(data_path)
-        report = import_initial_bins(data, dry_run=dry_run)
+        report = import_initial_bins(data, dry_run=dry_run, upsert=upsert)
         report_path.parent.mkdir(parents=True, exist_ok=True)
         report_path.write_text(
             json.dumps(report, ensure_ascii=False, indent=2) + "\n",
             encoding="utf-8",
         )
 
-        created = report.get("created_bins") or report.get("would_create_bins") or 0
+        created = report.get("created_bins") or 0
+        updated = report.get("updated_bins") or 0
         self.stdout.write(
             self.style.SUCCESS(
-                f"{'Dry-run' if dry_run else 'Import'} OK — bins={created} "
+                f"{'Dry-run' if dry_run else 'Import'} OK — "
+                f"creados={created} actualizados={updated} "
                 f"reporte={report_path}"
             )
         )

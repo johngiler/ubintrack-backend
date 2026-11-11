@@ -1,4 +1,5 @@
 from .parse import parse_xlsx_to_rows
+from .reassign_positions import reassign_cdf_bins_to_camara_9
 from .runner import DEFAULT_JSON, import_initial_bins, load_rows_from_json, write_json
 
 __all__ = [
@@ -6,5 +7,6 @@ __all__ = [
     "import_initial_bins",
     "load_rows_from_json",
     "parse_xlsx_to_rows",
+    "reassign_cdf_bins_to_camara_9",
     "write_json",
 ]
