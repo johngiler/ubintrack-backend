@@ -328,7 +328,7 @@ class PositionViewSet(WorkspaceScopeMixin, viewsets.ModelViewSet):
         
         return queryset.order_by('cava__name', 'hall', 'rack', 'level', 'place')
 
-    BULK_MAX_IDS = 2000
+    BULK_MAX_IDS = 10000
 
     def _parse_bulk_ids(self, request):
         raw = request.data.get("ids") or []
@@ -372,13 +372,21 @@ class PositionViewSet(WorkspaceScopeMixin, viewsets.ModelViewSet):
     def ids(self, request):
         """IDs del listado filtrado (para seleccionar todas tras filtrar)."""
         qs = self.filter_queryset(self.get_queryset())
-        id_list = list(qs.values_list("id", flat=True)[: self.BULK_MAX_IDS + 1])
-        if len(id_list) > self.BULK_MAX_IDS:
-            return Response(
-                {"detail": f"Máximo {self.BULK_MAX_IDS} posiciones por operación."},
-                status=status.HTTP_400_BAD_REQUEST,
+        total = qs.count()
+        id_list = list(qs.values_list("id", flat=True)[: self.BULK_MAX_IDS])
+        truncated = total > len(id_list)
+        payload = {
+            "ids": id_list,
+            "count": len(id_list),
+            "total": total,
+            "truncated": truncated,
+        }
+        if truncated:
+            payload["detail"] = (
+                f"Se seleccionaron {len(id_list)} de {total} "
+                f"(máximo {self.BULK_MAX_IDS} por operación)."
             )
-        return Response({"ids": id_list, "count": len(id_list)})
+        return Response(payload)
 
     def _start_position_bulk(self, request, *, kind, runner):
         from apps.common.models import BulkOperationJob
@@ -608,35 +616,33 @@ class PositionViewSet(WorkspaceScopeMixin, viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'])
     def print(self, request, pk=None):
-        """
-        Endpoint para imprimir el ZPL de una posición
-        """
-        # Restringir impresión para clientes
+        """Imprime la etiqueta ZPL de una posición."""
         if is_client_user(request.user):
-            return Response({'detail': 'No autorizado.'}, status=status.HTTP_403_FORBIDDEN)
+            return Response({"detail": "No autorizado."}, status=status.HTTP_403_FORBIDDEN)
 
         position = self.get_object()
-
-        # Verificar si tiene código ZPL
         if not position.zpl_code:
-            return Response({
-                'success': False,
-                'message': f'La posición {position.code} no tiene código ZPL generado'
-            }, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {
+                    "success": False,
+                    "message": "No hay etiqueta para imprimir.",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
-        # Imprimir el ZPL
-        success = print_to_zebra(position.zpl_code)
+        if not print_to_zebra(position.zpl_code):
+            return Response(
+                {
+                    "success": False,
+                    "message": "No se pudo imprimir la etiqueta. Verifique la impresora.",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
-        if success:
-            return Response({
-                'success': True,
-                'message': f'Etiqueta de la posición {position.code} enviada a impresión'
-            })
-        else:
-            return Response({
-                'success': False,
-                'message': 'Error al enviar a la impresora. Verifique la conexión.'
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return Response({
+            "success": True,
+            "message": "Etiqueta enviada a impresión.",
+        })
 
     @action(detail=True, methods=['post'])
     def regenerate_tag(self, request, pk=None):
@@ -646,9 +652,11 @@ class PositionViewSet(WorkspaceScopeMixin, viewsets.ModelViewSet):
 
         position = self.get_object()
         position.refresh_label(persist=True)
+        position.refresh_from_db(fields=["qr_code_image", "zpl_code"])
         qr_url = position.qr_code_image.url if position.qr_code_image else None
         return Response({
             "success": True,
             "message": "Etiqueta regenerada.",
             "qr_code_image": qr_url,
+            "zpl_code": position.zpl_code or "",
         })

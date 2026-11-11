@@ -1,7 +1,7 @@
-"""Token de pasillo derivado del nombre visible.
+"""Token de sección/cava derivado del nombre visible.
 
 Regla: hasta 2 iniciales (primera letra de cada palabra) + último número suelto.
-Ej.: «Pasillo 1» → P1 · «Tunel Tunel» → TT · «pedro pelon peludo» → PP.
+Ej.: «Pasillo 1» → P1 · «Anden 1» → A1 · «Paola Cabrona» → PC · «Tunel Tunel» → TT.
 """
 
 from __future__ import annotations

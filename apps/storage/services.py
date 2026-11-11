@@ -111,14 +111,13 @@ def generate_qr_with_label(data, text, level=None, font_path=None):
 
 
 def cava_code_prefix(name: str) -> str:
-    """Prefijo de 2 caracteres para códigos de posición (p. ej. «Cava 1» → «C1»)."""
-    parts = (name or "").split()
-    if len(parts) >= 2:
-        return f"{parts[0][0]}{parts[1][0]}".upper()
-    s = (name or "XX").strip().upper()
-    if len(s) >= 2:
-        return s[:2]
-    return s.ljust(2, "X")
+    """Token de cava desde el nombre (mismas reglas que pasillo).
+
+    «Anden 1» → A1 · «Paola Cabrona» → PC · «Cava 1» → C1.
+    """
+    from apps.storage.utils.aisle_token import aisle_token_from_name
+
+    return aisle_token_from_name(name) or "XX"
 
 
 def generate_rack_list(number):
@@ -137,24 +136,28 @@ def build_position_code(
 ):
     """Arma el código con la nomenclatura del owner.
 
-    Sin nomenclatura, el resultado sigue siendo el de antes: C1-PA-R1-N1A.
+    El token de cava ya viene completo (A1, PC, C1); no se antepone cava_prefix.
     """
     if nomenclature is None:
         separator = "-"
-        cava_prefix = ""
         rack_prefix = "R"
         level_prefix = "N"
     else:
         separator = nomenclature.separator or "-"
-        cava_prefix = nomenclature.cava_prefix or ""
         rack_prefix = nomenclature.rack_prefix or ""
         level_prefix = nomenclature.level_prefix or ""
 
     token = str(cava_code or "").strip()
-    if token:
-        cava_segment = f"{cava_prefix}{token}"
-    else:
-        cava_segment = cava_code_prefix(cava_name)
+    # Solo dígitos = esquema legacy («Anden»+«1» → A1); no anteponer cava_prefix.
+    if token.isdigit():
+        import re
+
+        name_token = cava_code_prefix(cava_name)
+        if name_token and name_token != "XX" and not re.search(r"\d+$", name_token):
+            token = f"{name_token}{token}"
+        else:
+            token = name_token if name_token and name_token != "XX" else token
+    cava_segment = token or cava_code_prefix(cava_name)
 
     def segment(prefix, value):
         raw = str(value or "").strip()

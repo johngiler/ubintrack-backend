@@ -207,6 +207,8 @@ class Bin(BaseModel):
 
     def refresh_label(self, *, persist=True):
         """Regenera imagen de tag + ZPL. Requiere pk (ruta media)."""
+        if self.tag_image:
+            self.tag_image.delete(save=False)
         tag_path = services.generate_bin_tag(self)
         self.tag_image.name = os.path.relpath(tag_path, settings.MEDIA_ROOT)
         self.zpl_code = services.generate_bin_tag_zpl(self)

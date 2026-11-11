@@ -73,7 +73,7 @@ class BinViewSet(ClientScopeMixin, viewsets.ModelViewSet):
     search_fields = [
         'code', 'bin_products__entry_product__product__client_sku']
     permission_classes = [IsAuthenticated, StrictDjangoModelPermissions]
-    BULK_MAX_IDS = 2000
+    BULK_MAX_IDS = 10000
 
     def get_queryset(self):
         return self.scope_to_user(super().get_queryset()).distinct()
@@ -137,13 +137,21 @@ class BinViewSet(ClientScopeMixin, viewsets.ModelViewSet):
     def ids(self, request):
         """IDs del listado filtrado (para seleccionar todas tras filtrar)."""
         qs = self.filter_queryset(self.get_queryset())
-        id_list = list(qs.values_list("id", flat=True)[: self.BULK_MAX_IDS + 1])
-        if len(id_list) > self.BULK_MAX_IDS:
-            return Response(
-                {"detail": f"Máximo {self.BULK_MAX_IDS} bins por operación."},
-                status=status.HTTP_400_BAD_REQUEST,
+        total = qs.count()
+        id_list = list(qs.values_list("id", flat=True)[: self.BULK_MAX_IDS])
+        truncated = total > len(id_list)
+        payload = {
+            "ids": id_list,
+            "count": len(id_list),
+            "total": total,
+            "truncated": truncated,
+        }
+        if truncated:
+            payload["detail"] = (
+                f"Se seleccionaron {len(id_list)} de {total} "
+                f"(máximo {self.BULK_MAX_IDS} por operación)."
             )
-        return Response({"ids": id_list, "count": len(id_list)})
+        return Response(payload)
 
     def _start_bin_bulk(self, request, *, kind, runner):
         from apps.common.models import BulkOperationJob
@@ -553,35 +561,33 @@ class BinViewSet(ClientScopeMixin, viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'])
     def print(self, request, pk=None):
-        # Restringir impresión para clientes
+        """Imprime la etiqueta ZPL de un bin."""
         if is_client_user(request.user):
-            from rest_framework.exceptions import PermissionDenied
-            raise PermissionDenied('No autorizado para imprimir etiquetas.')
-        """
-        Endpoint para imprimir el ZPL de un bin de entrada
-        """
+            return Response({"detail": "No autorizado."}, status=status.HTTP_403_FORBIDDEN)
+
         bin_instance = self.get_object()
-
-        # Verificar si tiene código ZPL
         if not bin_instance.zpl_code:
-            return Response({
-                'success': False,
-                'message': f'El bin de entrada {bin_instance.code} no tiene código ZPL generado'
-            }, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {
+                    "success": False,
+                    "message": "No hay etiqueta para imprimir.",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
-        # Imprimir el ZPL
-        success = print_to_zebra(bin_instance.zpl_code)
+        if not print_to_zebra(bin_instance.zpl_code):
+            return Response(
+                {
+                    "success": False,
+                    "message": "No se pudo imprimir la etiqueta. Verifique la impresora.",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
-        if success:
-            return Response({
-                'success': True,
-                'message': f'Etiqueta del bin de entrada {bin_instance.code} enviada a impresión'
-            })
-        else:
-            return Response({
-                'success': False,
-                'message': 'Error al enviar a la impresora. Verifique la conexión.'
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return Response({
+            "success": True,
+            "message": "Etiqueta enviada a impresión.",
+        })
 
     @action(detail=True, methods=['post'])
     def regenerate_tag(self, request, pk=None):
@@ -592,12 +598,13 @@ class BinViewSet(ClientScopeMixin, viewsets.ModelViewSet):
         bin_instance = self.get_object()
         success = bin_instance.generate_tag()
         if success:
+            bin_instance.refresh_from_db(fields=["tag_image", "zpl_code"])
             tag_url = bin_instance.tag_image.url if bin_instance.tag_image else None
             return Response({
                 "success": True,
                 "message": "Etiqueta regenerada.",
                 "tag_image": tag_url,
-                "zpl_code": bin_instance.zpl_code,
+                "zpl_code": bin_instance.zpl_code or "",
             })
         return Response(
             {

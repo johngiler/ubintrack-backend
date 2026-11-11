@@ -52,7 +52,9 @@ def run_bin_print(job: BulkOperationJob) -> dict[str, Any]:
     if not zpl_jobs:
         raise RuntimeError("Ningún bin tiene etiqueta para imprimir.")
     if not print_to_zebra("\n".join(zpl_jobs)):
-        raise RuntimeError("Error al enviar a la impresora. Verifique la conexión.")
+        raise RuntimeError(
+            "No se pudo imprimir la etiqueta. Verifique la impresora."
+        )
     parts = [f"Se enviaron {len(zpl_jobs)} etiquetas."]
     if skipped:
         parts.append(f"{len(skipped)} sin ZPL.")

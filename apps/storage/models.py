@@ -36,7 +36,13 @@ class PositionNomenclature(BaseModel):
         verbose_name="workspace",
     )
     separator = models.CharField(max_length=4, default="-", verbose_name="separador")
-    cava_prefix = models.CharField(max_length=8, blank=True, default="C", verbose_name="prefijo de cava")
+    cava_prefix = models.CharField(
+        max_length=8,
+        blank=True,
+        default="",
+        verbose_name="prefijo de cava",
+        help_text="Obsoleto: el token de la cava ya viene completo desde el nombre (A1, PC).",
+    )
     aisle_prefix = models.CharField(
         max_length=8,
         blank=True,
@@ -70,7 +76,7 @@ class Cava(BaseModel):
         blank=True,
         default="",
         verbose_name="código",
-        help_text="Token de la cava en la nomenclatura, sin prefijo. Ejemplo: 9 → C9.",
+        help_text="Token completo de la cava (iniciales del nombre). Ejemplo: Anden 1 → A1, Paola Cabrona → PC.",
     )
     condition = models.CharField(
         max_length=15, choices=choices.Conditions.choices, verbose_name='condición')
@@ -375,6 +381,9 @@ class Position(BaseModel):
             self.code, self.code, self.level
         )
         filename = f"qrcode-{self.code}.webp"
+        # Reescribe el archivo (upload_to fija la ruta por código).
+        if self.qr_code_image:
+            self.qr_code_image.delete(save=False)
         self.qr_code_image.save(filename, File(qr_buffer), save=False)
         self.zpl_code = services.generate_position_tag_zpl(self)
         if persist:

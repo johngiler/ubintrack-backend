@@ -186,8 +186,48 @@ class CavaSerializer(serializers.ModelSerializer):
                 )
         return blocks
 
+    def _ensure_cava_code(self, validated_data, instance=None):
+        """Token completo desde el nombre si falta o quedó el esquema numérico legacy."""
+        import re
+
+        from apps.storage.utils.aisle_token import aisle_token_from_name
+
+        name = validated_data.get("name")
+        if name is None:
+            name = instance.name if instance is not None else ""
+        code = validated_data.get("code")
+        if code is None:
+            code = instance.code if instance is not None else ""
+        code = str(code or "").strip()
+        # Ya es token completo (A1, PC, …).
+        if code and not code.isdigit():
+            validated_data["code"] = code
+            return
+        storage = validated_data.get("storage")
+        if storage is None and instance is not None:
+            storage = instance.storage
+        workspace_id = getattr(storage, "workspace_id", None) if storage is not None else None
+        used: set[str] = set()
+        if workspace_id:
+            qs = storage_models.Cava.objects.filter(storage__workspace_id=workspace_id)
+            if instance is not None and instance.pk:
+                qs = qs.exclude(pk=instance.pk)
+            used = {
+                str(value).strip()
+                for value in qs.values_list("code", flat=True)
+                if str(value or "").strip()
+            }
+        # «Anden»+«1» → A1; si el nombre ya trae número o no hay dígitos legacy → iniciales.
+        name_token = aisle_token_from_name(name)
+        if code.isdigit() and name_token and not re.search(r"\d+$", name_token):
+            source_name = f"{name} {code}".strip()
+        else:
+            source_name = name
+        validated_data["code"] = unique_aisle_token(source_name, used)
+
     def create(self, validated_data):
         blocks = validated_data.pop("blocks", None)
+        self._ensure_cava_code(validated_data)
         cava = super().create(validated_data)
         self._replace_blocks(cava, blocks)
         return cava
@@ -195,6 +235,7 @@ class CavaSerializer(serializers.ModelSerializer):
     def update(self, instance, validated_data):
         blocks = validated_data.pop("blocks", None)
         was_generated = bool(instance.positions_has_been_generated)
+        self._ensure_cava_code(validated_data, instance=instance)
         cava = super().update(instance, validated_data)
         self._replace_blocks(cava, blocks)
         # Plano ya generado: alinear posiciones (crear faltantes / borrar libres huérfanas).
