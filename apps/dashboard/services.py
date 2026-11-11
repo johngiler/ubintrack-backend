@@ -6,8 +6,8 @@ from collections import defaultdict
 from datetime import timedelta
 
 from django.db import connection
-from django.db.models import Count, Q
-from django.db.models.functions import TruncDate, TruncMonth
+from django.db.models import Case, Count, IntegerField, Q, Value, When
+from django.db.models.functions import Cast, TruncDate, TruncMonth
 from django.utils import timezone
 
 from apps.core import choices
@@ -326,7 +326,15 @@ def build_warehouse_structure(workspace) -> dict | None:
     cavas = (
         Cava.objects.filter(storage=storage, is_active=True)
         .prefetch_related("blocks")
-        .order_by("name")
+        # Mismo nombre (p. ej. «Cámara») → código numérico (2 antes que 9).
+        .annotate(
+            _code_num=Case(
+                When(code__regex=r"^\d+$", then=Cast("code", IntegerField())),
+                default=Value(None),
+                output_field=IntegerField(),
+            )
+        )
+        .order_by("name", "_code_num", "code", "id")
     )
     cavas_data = []
     global_stats = {

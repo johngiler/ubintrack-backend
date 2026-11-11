@@ -13,7 +13,8 @@ from apps.common.pagination import MediumPagination
 from django_filters.rest_framework import DjangoFilterBackend
 import django_filters
 from django.core.files import File
-from django.db.models import Count, Prefetch, Q
+from django.db.models import Case, Count, IntegerField, Prefetch, Q, Value, When
+from django.db.models.functions import Cast
 
 from apps.storage import models as storage_models
 from apps.storage.generation import iter_slots
@@ -92,7 +93,15 @@ class CavaViewSet(WorkspaceScopeMixin, viewsets.ModelViewSet):
     search_fields = ["name", "storage__name"]
 
     def get_queryset(self):
-        return self.scope_to_workspace(super().get_queryset())
+        qs = self.scope_to_workspace(super().get_queryset())
+        # Mismo nombre (p. ej. «Cámara») → ordenar por código numérico (2 antes que 9).
+        return qs.annotate(
+            _code_num=Case(
+                When(code__regex=r"^\d+$", then=Cast("code", IntegerField())),
+                default=Value(None),
+                output_field=IntegerField(),
+            )
+        ).order_by("name", "_code_num", "code", "id")
 
     @action(detail=False, methods=["get"])
     def totals(self, request):
