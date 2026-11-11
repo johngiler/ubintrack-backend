@@ -31,8 +31,15 @@ class BinProductInline(admin.TabularInline):
 @admin.register(models.Bin)
 class BinAdmin(admin.ModelAdmin):
     list_display = ('code', 'client', 'entry', 'status',
-                    'position', 'product_with_quantities')
-    search_fields = ('code', 'entry__code', 'position__code', 'client__name')
+                    'position', 'lpn', 'product_with_quantities')
+    search_fields = (
+        'code',
+        'lpn',
+        'barcode',
+        'entry__code',
+        'position__code',
+        'client__name',
+    )
     autocomplete_fields = ('entry',)
     readonly_fields = ('tag_image_preview',)
     inlines = [BinProductInline,]

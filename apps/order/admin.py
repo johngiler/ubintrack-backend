@@ -8,7 +8,14 @@ from . import models
 class EntryProductInline(admin.TabularInline):
     model = models.EntryProduct
     extra = 1
-    fields = ('product', 'quantity', 'real_quantity', 'expiration_date', 'batch')
+    fields = (
+        'product',
+        'quantity',
+        'real_quantity',
+        'production_date',
+        'expiration_date',
+        'batch',
+    )
 
 
 class EntryDetailInline(admin.StackedInline):

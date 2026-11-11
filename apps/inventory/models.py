@@ -164,6 +164,24 @@ class Bin(BaseModel):
     is_processed = models.BooleanField(
         default=False, verbose_name='procesado')
 
+    lpn = models.CharField(
+        max_length=100,
+        blank=True,
+        default="",
+        verbose_name="LPN",
+    )
+    barcode = models.CharField(
+        max_length=100,
+        blank=True,
+        default="",
+        verbose_name="código de barra",
+    )
+    observation = models.TextField(
+        blank=True,
+        default="",
+        verbose_name="observación",
+    )
+
     class Meta:
         verbose_name = 'bin'
         verbose_name_plural = 'bins'

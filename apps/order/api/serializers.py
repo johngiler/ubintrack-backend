@@ -39,8 +39,19 @@ class EntryProductSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = order_models.EntryProduct
-        fields = ['id', 'quantity', 'real_quantity', 'expiration_date',
-                  'batch', 'product', 'product_id', 'entry_id', 'is_completed', 'in_inventory']
+        fields = [
+            'id',
+            'quantity',
+            'real_quantity',
+            'production_date',
+            'expiration_date',
+            'batch',
+            'product',
+            'product_id',
+            'entry_id',
+            'is_completed',
+            'in_inventory',
+        ]
 
 
 class EntryProductSimpleSerializer(serializers.ModelSerializer):
@@ -50,8 +61,17 @@ class EntryProductSimpleSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = order_models.EntryProduct
-        fields = ['id', 'quantity', 'real_quantity', 'expiration_date',
-                  'batch', 'is_completed', 'in_inventory', 'related_bins']
+        fields = [
+            'id',
+            'quantity',
+            'real_quantity',
+            'production_date',
+            'expiration_date',
+            'batch',
+            'is_completed',
+            'in_inventory',
+            'related_bins',
+        ]
 
     def get_related_bins(self, obj):
         """Obtiene los bins relacionados a este producto de entrada"""

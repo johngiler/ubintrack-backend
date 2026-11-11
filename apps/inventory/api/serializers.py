@@ -114,8 +114,16 @@ class EntryProductSimpleSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = order_models.EntryProduct
-        fields = ['id', 'expiration_date', 'batch',
-                  'product', 'quantity', 'is_completed', 'in_inventory']
+        fields = [
+            'id',
+            'production_date',
+            'expiration_date',
+            'batch',
+            'product',
+            'quantity',
+            'is_completed',
+            'in_inventory',
+        ]
 
 
 class BinProductSerializer(serializers.ModelSerializer):

@@ -118,6 +118,12 @@ class EntryProduct(BaseModel):
     real_quantity = models.PositiveBigIntegerField(
         default=0, verbose_name='cantidad real')
 
+    production_date = models.DateField(
+        null=True,
+        blank=True,
+        verbose_name='fecha de producción',
+    )
+
     expiration_date = models.DateField(
         null=True,
         blank=True,

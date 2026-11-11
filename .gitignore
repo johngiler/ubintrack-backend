@@ -14,6 +14,9 @@ config/settings/local_settings.production.py
 media/
 static/
 staticfiles/
-data/
+data/**
 !data/db/
-!data/db/.gitkeep
+!data/db/**
+!data/imports/
+!data/imports/**
+data/imports/**/*_report.json
