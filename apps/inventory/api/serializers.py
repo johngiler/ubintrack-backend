@@ -204,13 +204,6 @@ class BinProductSerializer(serializers.ModelSerializer):
 
         return data
 
-    def create(self, validated_data):
-        bin_product = super().create(validated_data)
-        # Intentar generar el tag después de crear el producto
-        bin_product.bin.generate_tag()
-        return bin_product
-
-
 class BinProductSimpleSerializer(serializers.ModelSerializer):
     entry_product = EntryProductSimpleSerializer(read_only=True)
     reservations = serializers.SerializerMethodField()

@@ -12,7 +12,6 @@ from rest_framework.views import APIView
 from apps.common.pagination import MediumPagination
 from django_filters.rest_framework import DjangoFilterBackend
 import django_filters
-from django.core.files import File
 from django.db.models import Case, Count, IntegerField, Prefetch, Q, Value, When
 from django.db.models.functions import Cast
 
@@ -381,9 +380,11 @@ class PositionViewSet(WorkspaceScopeMixin, viewsets.ModelViewSet):
             )
         return Response({"ids": id_list, "count": len(id_list)})
 
-    @action(detail=False, methods=["delete"], url_path="bulk-delete")
-    def bulk_delete(self, request):
-        """Elimina en masa posiciones libres del scope del usuario."""
+    def _start_position_bulk(self, request, *, kind, runner):
+        from apps.common.models import BulkOperationJob
+        from apps.common.tasks import run_bulk_operation_job
+        from apps.common.utils.bulk_jobs import serialize_bulk_job, start_bulk_operation
+
         if is_client_user(request.user):
             return Response({"detail": "No autorizado."}, status=status.HTTP_403_FORBIDDEN)
 
@@ -391,27 +392,60 @@ class PositionViewSet(WorkspaceScopeMixin, viewsets.ModelViewSet):
         if error is not None:
             return error
 
-        qs = self.scope_to_workspace(
-            storage_models.Position.objects.filter(id__in=ids)
+        ws = get_workspace_for_request(request)
+        if ws is None:
+            return Response(
+                {"detail": "No se pudo completar la operación."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        scoped_ids = list(
+            self.scope_to_workspace(
+                storage_models.Position.objects.filter(id__in=ids)
+            ).values_list("id", flat=True)
         )
-        found_ids = set(qs.values_list("id", flat=True))
-        missing = len(ids) - len(found_ids)
+        if not scoped_ids:
+            return Response(
+                {"detail": "No se encontraron posiciones."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
-        blocked_count = qs.exclude(status="libre").count()
-        deleted_count, _ = qs.filter(status="libre").delete()
+        job, ran_async = start_bulk_operation(
+            workspace=ws,
+            kind=kind,
+            item_ids=scoped_ids,
+            runner=runner,
+            celery_task=run_bulk_operation_job,
+        )
+        payload = serialize_bulk_job(job, async_=ran_async)
+        if ran_async:
+            return Response(payload, status=status.HTTP_202_ACCEPTED)
+        if job.status == BulkOperationJob.Status.FAILED:
+            return Response(payload, status=status.HTTP_400_BAD_REQUEST)
+        return Response(payload)
 
-        parts = [f"Se eliminaron {deleted_count} posiciones."]
-        if blocked_count:
-            parts.append(f"{blocked_count} no estaban libres.")
-        if missing:
-            parts.append(f"{missing} no encontradas.")
-        return Response(
-            {
-                "success": True,
-                "deleted": deleted_count,
-                "blocked": blocked_count,
-                "message": " ".join(parts),
-            }
+    @action(detail=False, methods=["delete"], url_path="bulk-delete")
+    def bulk_delete(self, request):
+        """Elimina posiciones libres en masa (async si hay más de una)."""
+        from apps.common.models import BulkOperationJob
+        from apps.storage.services_bulk import run_position_delete
+
+        return self._start_position_bulk(
+            request,
+            kind=BulkOperationJob.Kind.POSITION_DELETE,
+            runner=run_position_delete,
+        )
+
+    @action(detail=False, methods=["post"], url_path="bulk-regenerate-tags")
+    def bulk_regenerate_tags(self, request):
+        """Regenera QR/ZPL de posiciones (async si hay más de una)."""
+        from apps.common.models import BulkOperationJob
+        from apps.storage.services_bulk import run_position_regenerate_tags
+
+        return self._start_position_bulk(
+            request,
+            kind=BulkOperationJob.Kind.POSITION_REGENERATE_TAGS,
+            runner=run_position_regenerate_tags,
         )
 
     @staticmethod
@@ -562,63 +596,14 @@ class PositionViewSet(WorkspaceScopeMixin, viewsets.ModelViewSet):
 
     @action(detail=False, methods=["post"], url_path="bulk-print")
     def bulk_print(self, request):
-        """Imprime etiquetas ZPL de varias posiciones."""
-        if is_client_user(request.user):
-            return Response({"detail": "No autorizado."}, status=status.HTTP_403_FORBIDDEN)
+        """Imprime etiquetas ZPL de posiciones (async si hay más de una)."""
+        from apps.common.models import BulkOperationJob
+        from apps.storage.services_bulk import run_position_print
 
-        ids, error = self._parse_bulk_ids(request)
-        if error is not None:
-            return error
-
-        positions = list(
-            self.scope_to_workspace(
-                storage_models.Position.objects.filter(id__in=ids)
-            )
-            .only("id", "code", "zpl_code")
-            .order_by("cava__name", "hall", "rack", "level", "place")
-        )
-        if not positions:
-            return Response(
-                {"detail": "No se encontraron posiciones."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        skipped = [p.code for p in positions if not p.zpl_code]
-        zpl_jobs = [p.zpl_code for p in positions if p.zpl_code]
-        if not zpl_jobs:
-            return Response(
-                {
-                    "success": False,
-                    "printed": 0,
-                    "skipped": skipped,
-                    "message": "Ninguna posición tiene etiqueta para imprimir.",
-                },
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        # Un envío con todos los ZPL (varios ^XA…^XZ) evita N conexiones.
-        if not print_to_zebra("\n".join(zpl_jobs)):
-            return Response(
-                {
-                    "success": False,
-                    "printed": 0,
-                    "skipped": skipped,
-                    "message": "Error al enviar a la impresora. Verifique la conexión.",
-                },
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            )
-
-        printed = len(zpl_jobs)
-        parts = [f"Se enviaron {printed} etiquetas."]
-        if skipped:
-            parts.append(f"{len(skipped)} sin ZPL.")
-        return Response(
-            {
-                "success": True,
-                "printed": printed,
-                "skipped": skipped,
-                "message": " ".join(parts),
-            }
+        return self._start_position_bulk(
+            request,
+            kind=BulkOperationJob.Kind.POSITION_PRINT,
+            runner=run_position_print,
         )
 
     @action(detail=True, methods=['post'])
@@ -655,28 +640,15 @@ class PositionViewSet(WorkspaceScopeMixin, viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'])
     def regenerate_tag(self, request, pk=None):
-        """
-        Endpoint para regenerar el tag y ZPL de una posición
-        """
-        # Restringir regeneración para clientes
+        """Regenera QR/ZPL de una posición (sync)."""
         if is_client_user(request.user):
-            return Response({'detail': 'No autorizado.'}, status=status.HTTP_403_FORBIDDEN)
+            return Response({"detail": "No autorizado."}, status=status.HTTP_403_FORBIDDEN)
 
         position = self.get_object()
-
-        # Regenerar el QR y el ZPL
-        qr_buffer = storage_models.services.generate_qr_with_label(
-            position.code, position.code, position.level)
-        filename = f"qrcode-{position.code}.webp"
-        position.qr_code_image.save(
-            filename, File(qr_buffer), save=False)
-
-        # Regenerar código ZPL
-        position.zpl_code = storage_models.services.generate_position_tag_zpl(
-            position)
-        position.save(update_fields=['qr_code_image', 'zpl_code'])
-
+        position.refresh_label(persist=True)
+        qr_url = position.qr_code_image.url if position.qr_code_image else None
         return Response({
-            'success': True,
-            'message': f'Tag y ZPL de la posición {position.code} regenerados correctamente'
+            "success": True,
+            "message": "Etiqueta regenerada.",
+            "qr_code_image": qr_url,
         })

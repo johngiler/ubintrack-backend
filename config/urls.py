@@ -12,6 +12,7 @@ from apps.inventory.api import views as inventory_views
 from apps.order.api import views as order_views
 from apps.storage.api import views as storage_views
 from apps.task.api import views as task_views
+from apps.common.api.views import BulkOperationJobDetailView
 from apps.notifications.views import NotificationViewSet
 from apps.notifications.views_frontend_build import FrontendBuildPublishView
 from apps.workspaces.api.views import WorkspaceCurrentView, WorkspaceMeView
@@ -59,6 +60,11 @@ urlpatterns = [
     ),
     path("api/workspace/current/", WorkspaceCurrentView.as_view(), name="workspace-current"),
     path("api/me/workspace/", WorkspaceMeView.as_view(), name="workspace-me"),
+    path(
+        "api/bulk-jobs/<int:pk>/",
+        BulkOperationJobDetailView.as_view(),
+        name="bulk-operation-job-detail",
+    ),
     path("api/dashboard/stats/", dashboard_views.DashboardStatsView.as_view(), name="dashboard-stats"),
     path("api/warehouse/structure/", dashboard_views.WarehouseStructureView.as_view(), name="warehouse-structure"),
     path("api/dashboard/client-stats/", dashboard_views.ClientStatsView.as_view(), name="client-stats"),

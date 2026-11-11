@@ -145,57 +145,75 @@ class BinViewSet(ClientScopeMixin, viewsets.ModelViewSet):
             )
         return Response({"ids": id_list, "count": len(id_list)})
 
-    @action(detail=False, methods=["delete"], url_path="bulk-delete")
-    def bulk_delete(self, request):
-        """Elimina bins en masa respetando las mismas reglas que el destroy unitario."""
+    def _start_bin_bulk(self, request, *, kind, runner):
+        from apps.common.models import BulkOperationJob
+        from apps.common.tasks import run_bulk_operation_job
+        from apps.common.utils.bulk_jobs import serialize_bulk_job, start_bulk_operation
+        from apps.workspaces.utils.tenant import get_workspace_for_request
+
         if is_client_user(request.user):
             return Response({"detail": "No autorizado."}, status=status.HTTP_403_FORBIDDEN)
-
-        from apps.order.models import ExitProduct
-        from apps.storage.models import Position
-        from django.utils import timezone
 
         ids, error = self._parse_bulk_ids(request)
         if error is not None:
             return error
 
-        qs = self.scope_to_user(
-            inventory_models.Bin.objects.filter(id__in=ids)
-        ).distinct()
-        found_ids = set(qs.values_list("id", flat=True))
-        missing = len(ids) - len(found_ids)
+        ws = get_workspace_for_request(request)
+        if ws is None:
+            return Response(
+                {"detail": "No se pudo completar la operación."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
-        blocked = 0
-        deleted = 0
-        for bin_obj in qs.iterator():
-            if bin_obj.status == choices.BinStatus.ALMACENADO:
-                has_exit_products = ExitProduct.objects.filter(
-                    bin_product__bin=bin_obj,
-                    exit_product_group__exit__status__in=["pendiente", "en_progreso"],
-                ).exists()
-                if has_exit_products:
-                    blocked += 1
-                    continue
-            if bin_obj.position_id:
-                Position.objects.filter(pk=bin_obj.position_id).update(
-                    status=choices.PositionStatus.LIBRE,
-                    updated_at=timezone.now(),
-                )
-            bin_obj.delete()
-            deleted += 1
+        scoped_ids = list(
+            self.scope_to_user(
+                inventory_models.Bin.objects.filter(id__in=ids, workspace=ws)
+            )
+            .distinct()
+            .values_list("id", flat=True)
+        )
+        if not scoped_ids:
+            return Response(
+                {"detail": "No se encontraron bins."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
-        parts = [f"Se eliminaron {deleted} bins."]
-        if blocked:
-            parts.append(f"{blocked} con salidas asociadas.")
-        if missing:
-            parts.append(f"{missing} no encontrados.")
-        return Response(
-            {
-                "success": True,
-                "deleted": deleted,
-                "blocked": blocked,
-                "message": " ".join(parts),
-            }
+        job, ran_async = start_bulk_operation(
+            workspace=ws,
+            kind=kind,
+            item_ids=scoped_ids,
+            runner=runner,
+            celery_task=run_bulk_operation_job,
+        )
+        payload = serialize_bulk_job(job, async_=ran_async)
+        if ran_async:
+            return Response(payload, status=status.HTTP_202_ACCEPTED)
+        if job.status == BulkOperationJob.Status.FAILED:
+            return Response(payload, status=status.HTTP_400_BAD_REQUEST)
+        return Response(payload)
+
+    @action(detail=False, methods=["delete"], url_path="bulk-delete")
+    def bulk_delete(self, request):
+        """Elimina bins en masa (async si hay más de uno)."""
+        from apps.common.models import BulkOperationJob
+        from apps.inventory.services_bulk import run_bin_delete
+
+        return self._start_bin_bulk(
+            request,
+            kind=BulkOperationJob.Kind.BIN_DELETE,
+            runner=run_bin_delete,
+        )
+
+    @action(detail=False, methods=["post"], url_path="bulk-regenerate-tags")
+    def bulk_regenerate_tags(self, request):
+        """Regenera etiquetas/ZPL de bins (async si hay más de uno)."""
+        from apps.common.models import BulkOperationJob
+        from apps.inventory.services_bulk import run_bin_regenerate_tags
+
+        return self._start_bin_bulk(
+            request,
+            kind=BulkOperationJob.Kind.BIN_REGENERATE_TAGS,
+            runner=run_bin_regenerate_tags,
         )
 
     @action(detail=False, methods=["post"], url_path="bulk-update-flags")
@@ -264,60 +282,14 @@ class BinViewSet(ClientScopeMixin, viewsets.ModelViewSet):
 
     @action(detail=False, methods=["post"], url_path="bulk-print")
     def bulk_print(self, request):
-        """Imprime etiquetas ZPL de varios bins."""
-        if is_client_user(request.user):
-            return Response({"detail": "No autorizado."}, status=status.HTTP_403_FORBIDDEN)
+        """Imprime etiquetas ZPL de bins (async si hay más de uno)."""
+        from apps.common.models import BulkOperationJob
+        from apps.inventory.services_bulk import run_bin_print
 
-        ids, error = self._parse_bulk_ids(request)
-        if error is not None:
-            return error
-
-        bins = list(
-            self.scope_to_user(inventory_models.Bin.objects.filter(id__in=ids))
-            .distinct()
-            .only("id", "code", "zpl_code")
-            .order_by("code")
-        )
-        if not bins:
-            return Response(
-                {"detail": "No se encontraron bins."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        skipped = [b.code for b in bins if not b.zpl_code]
-        zpl_jobs = [b.zpl_code for b in bins if b.zpl_code]
-        if not zpl_jobs:
-            return Response(
-                {
-                    "success": False,
-                    "printed": 0,
-                    "skipped": skipped,
-                    "message": "Ningún bin tiene etiqueta para imprimir.",
-                },
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        if not print_to_zebra("\n".join(zpl_jobs)):
-            return Response(
-                {
-                    "success": False,
-                    "printed": 0,
-                    "skipped": skipped,
-                    "message": "Error al enviar a la impresora. Verifique la conexión.",
-                },
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            )
-
-        parts = [f"Se enviaron {len(zpl_jobs)} etiquetas."]
-        if skipped:
-            parts.append(f"{len(skipped)} sin ZPL.")
-        return Response(
-            {
-                "success": True,
-                "printed": len(zpl_jobs),
-                "skipped": skipped,
-                "message": " ".join(parts),
-            }
+        return self._start_bin_bulk(
+            request,
+            kind=BulkOperationJob.Kind.BIN_PRINT,
+            runner=run_bin_print,
         )
 
     def perform_create(self, serializer):
@@ -613,27 +585,27 @@ class BinViewSet(ClientScopeMixin, viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'])
     def regenerate_tag(self, request, pk=None):
-        # Restringir regeneración de tag para clientes
+        """Regenera etiqueta/ZPL de un bin (sync)."""
         if is_client_user(request.user):
-            from rest_framework.exceptions import PermissionDenied
-            raise PermissionDenied('No autorizado para regenerar tags.')
-        """
-        Endpoint para regenerar el tag y ZPL de un bin de entrada
-        """
+            return Response({"detail": "No autorizado."}, status=status.HTTP_403_FORBIDDEN)
+
         bin_instance = self.get_object()
         success = bin_instance.generate_tag()
-
         if success:
+            tag_url = bin_instance.tag_image.url if bin_instance.tag_image else None
             return Response({
-                'success': True,
-                'message': f'Tag y ZPL del bin de entrada {bin_instance.code} regenerados correctamente',
-                'zpl_code': bin_instance.zpl_code
+                "success": True,
+                "message": "Etiqueta regenerada.",
+                "tag_image": tag_url,
+                "zpl_code": bin_instance.zpl_code,
             })
-        else:
-            return Response({
-                'success': False,
-                'message': 'No se pudo regenerar el tag. Verifique que el bin tenga posición y productos.'
-            }, status=status.HTTP_400_BAD_REQUEST)
+        return Response(
+            {
+                "success": False,
+                "message": "No se pudo regenerar la etiqueta.",
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
 
     @action(detail=True, methods=['get'], url_path='movements')
     def movements(self, request, pk=None):

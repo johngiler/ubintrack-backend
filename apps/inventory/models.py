@@ -192,16 +192,61 @@ class Bin(BaseModel):
             ),
         ]
 
+    # Campos del bin que alimentan tag_image / zpl_code.
+    _LABEL_SOURCE_FIELDS = frozenset(
+        {
+            "position",
+            "position_id",
+            "client",
+            "client_id",
+            "code",
+            "entry",
+            "entry_id",
+        }
+    )
+
+    def refresh_label(self, *, persist=True):
+        """Regenera imagen de tag + ZPL. Requiere pk (ruta media)."""
+        tag_path = services.generate_bin_tag(self)
+        self.tag_image.name = os.path.relpath(tag_path, settings.MEDIA_ROOT)
+        self.zpl_code = services.generate_bin_tag_zpl(self)
+        if persist:
+            models.Model.save(
+                self,
+                update_fields=["tag_image", "zpl_code", "updated_at"],
+            )
+        return True
+
+    def generate_tag(self):
+        """Regenera etiqueta (imagen + ZPL). Disponible desde create."""
+        if not self.pk:
+            return False
+        try:
+            return self.refresh_label(persist=True)
+        except Exception as exc:
+            logger.error("Error generando tag o ZPL del bin %s: %s", self.pk, exc)
+            return False
+
     def save(self, *args, **kwargs):
+        update_fields = kwargs.get("update_fields")
         is_new = self._state.adding
+        uf = set(update_fields) if update_fields is not None else None
+
+        # Persistencia pura de etiqueta ya generada (evita recursión).
+        if uf is not None and uf <= {"tag_image", "zpl_code", "updated_at"}:
+            super().save(*args, **kwargs)
+            return
 
         old_status = None
+        old_snapshot = None
         if not is_new:
-            try:
-                old_instance = Bin.objects.get(pk=self.pk)
-                old_status = old_instance.status
-            except Bin.DoesNotExist:
-                pass
+            old_snapshot = (
+                Bin.objects.filter(pk=self.pk)
+                .values("status", "position_id", "client_id", "code")
+                .first()
+            )
+            if old_snapshot:
+                old_status = old_snapshot["status"]
 
         if not self.client and self.entry:
             self.client = self.entry.client
@@ -232,28 +277,39 @@ class Bin(BaseModel):
         if self.status == choices.BinStatus.DESPACHADO and not self.dispatched_date:
             self.dispatched_date = timezone.now()
 
-        if (old_status != self.status and
-            self.status in [choices.BinStatus.EN_DESPACHO, choices.BinStatus.DESPACHADO] and
-                self.position):
+        if (
+            old_status != self.status
+            and self.status
+            in [choices.BinStatus.EN_DESPACHO, choices.BinStatus.DESPACHADO]
+            and self.position_id
+        ):
             from apps.storage.models import Position
-            Position.objects.filter(pk=self.position.pk).update(
+
+            Position.objects.filter(pk=self.position_id).update(
                 status=choices.PositionStatus.LIBRE,
-                updated_at=timezone.now()
+                updated_at=timezone.now(),
             )
+
+        need_refresh_label = False
+        if is_new:
+            need_refresh_label = True
+        elif uf is not None:
+            need_refresh_label = bool(uf & self._LABEL_SOURCE_FIELDS)
+        elif old_snapshot:
+            need_refresh_label = (
+                old_snapshot["position_id"] != self.position_id
+                or old_snapshot["client_id"] != self.client_id
+                or old_snapshot["code"] != self.code
+                or not self.tag_image
+                or not self.zpl_code
+            )
+        else:
+            need_refresh_label = not self.tag_image or not self.zpl_code
 
         super().save(*args, **kwargs)
 
-        if not is_new and self.position:
-            try:
-                if self.bin_products.exists():
-                    tag_path = services.generate_bin_tag(self)
-                    self.tag_image.name = os.path.relpath(
-                        tag_path, settings.MEDIA_ROOT)
-                    self.zpl_code = services.generate_bin_tag_zpl(self)
-                    models.Model.save(self, update_fields=[
-                                      'tag_image', 'zpl_code'])
-            except Exception as e:
-                logger.error(f"Error generando tag o ZPL: {str(e)}")
+        if need_refresh_label:
+            self.generate_tag()
 
     @staticmethod
     def generate_bin_code(workspace_id=None):
@@ -273,16 +329,6 @@ class Bin(BaseModel):
     def generate_global_bin_code():
         """Compat: secuencia global (preferir generate_bin_code(workspace_id))."""
         return Bin.generate_bin_code()
-
-    def generate_tag(self):
-        if self.position and self.bin_products.exists():
-            tag_path = services.generate_bin_tag(self)
-            self.tag_image.name = os.path.relpath(
-                tag_path, settings.MEDIA_ROOT)
-            self.zpl_code = services.generate_bin_tag_zpl(self)
-            self.save(update_fields=['tag_image', 'zpl_code'])
-            return True
-        return False
 
     def __str__(self):
         return self.code
@@ -350,22 +396,61 @@ class BinProduct(BaseModel):
                     'inconsistency_error': True
                 })
 
+    # Campos del producto de bin que aparecen en tag/ZPL.
+    _LABEL_SOURCE_FIELDS = frozenset(
+        {
+            "quantity",
+            "batch",
+            "expiration_date",
+            "entry_product",
+            "entry_product_id",
+        }
+    )
+
     def save(self, *args, **kwargs):
         self.clean()
 
-        if self.pk:
-            try:
-                previous = BinProduct.objects.get(pk=self.pk)
-                quantity_changed = previous.quantity != self.quantity
-            except BinProduct.DoesNotExist:
-                quantity_changed = True
-        else:
-            quantity_changed = True
+        update_fields = kwargs.get("update_fields")
+        uf = set(update_fields) if update_fields is not None else None
+        label_changed = self._state.adding
+
+        if not label_changed:
+            if uf is not None:
+                label_changed = bool(uf & self._LABEL_SOURCE_FIELDS)
+            else:
+                previous = (
+                    BinProduct.objects.filter(pk=self.pk)
+                    .values(
+                        "quantity",
+                        "batch",
+                        "expiration_date",
+                        "entry_product_id",
+                    )
+                    .first()
+                )
+                if previous is None:
+                    label_changed = True
+                else:
+                    label_changed = (
+                        previous["quantity"] != self.quantity
+                        or previous["batch"] != self.batch
+                        or previous["expiration_date"] != self.expiration_date
+                        or previous["entry_product_id"] != self.entry_product_id
+                    )
 
         super().save(*args, **kwargs)
 
-        if quantity_changed and self.bin:
+        if label_changed and self.bin_id:
             self.bin.generate_tag()
+
+    def delete(self, *args, **kwargs):
+        bin_id = self.bin_id
+        result = super().delete(*args, **kwargs)
+        if bin_id:
+            bin_obj = Bin.objects.filter(pk=bin_id).first()
+            if bin_obj is not None:
+                bin_obj.generate_tag()
+        return result
 
     def __str__(self):
         name = self.entry_product.product.name.upper()

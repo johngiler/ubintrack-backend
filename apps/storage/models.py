@@ -337,6 +337,12 @@ class Position(BaseModel):
             ),
         ]
 
+    # Campos de slot que alimentan `code` (y por tanto QR/ZPL).
+    _LABEL_SOURCE_FIELDS = frozenset(
+        {"cava", "cava_id", "hall", "rack", "level", "place"}
+    )
+    _LABEL_OUTPUT_FIELDS = frozenset({"code", "qr_code_image", "zpl_code"})
+
     def clean(self):
         from apps.storage.utils.position_flags import validate_position_flags
 
@@ -347,7 +353,42 @@ class Position(BaseModel):
             is_push=bool(self.is_push),
         )
 
+    def build_code(self) -> str:
+        nomenclature = None
+        if self.workspace_id:
+            nomenclature = PositionNomenclature.objects.filter(
+                workspace_id=self.workspace_id
+            ).first()
+        return services.build_position_code(
+            cava_name=self.cava.name if self.cava_id and self.cava else "",
+            cava_code=self.cava.code if self.cava_id and self.cava else "",
+            hall=self.hall,
+            rack=self.rack,
+            level=self.level,
+            place=self.place,
+            nomenclature=nomenclature,
+        )
+
+    def refresh_label(self, *, persist=False):
+        """Regenera imagen QR + ZPL a partir de code/level."""
+        qr_buffer = services.generate_qr_with_label(
+            self.code, self.code, self.level
+        )
+        filename = f"qrcode-{self.code}.webp"
+        self.qr_code_image.save(filename, File(qr_buffer), save=False)
+        self.zpl_code = services.generate_position_tag_zpl(self)
+        if persist:
+            models.Model.save(
+                self,
+                update_fields=["qr_code_image", "zpl_code", "updated_at"],
+            )
+        return self
+
     def save(self, *args, **kwargs):
+        update_fields = kwargs.get("update_fields")
+        is_new = self._state.adding
+        previous_code = None
+
         if self.cava_id and not self.workspace_id:
             ws_id = (
                 Cava.objects.filter(pk=self.cava_id)
@@ -361,30 +402,94 @@ class Position(BaseModel):
         self.rack = str(self.rack or "").strip()
         self.place = str(self.place or "").strip()
 
-        if not self.code:
-            nomenclature = None
-            if self.workspace_id:
-                nomenclature = PositionNomenclature.objects.filter(
-                    workspace_id=self.workspace_id
-                ).first()
-            self.code = services.build_position_code(
-                cava_name=self.cava.name if self.cava_id and self.cava else "",
-                cava_code=self.cava.code if self.cava_id and self.cava else "",
-                hall=self.hall,
-                rack=self.rack,
-                level=self.level,
-                place=self.place,
-                nomenclature=nomenclature,
+        need_rebuild_code = is_new or not self.code
+        need_refresh_label = is_new or not self.qr_code_image or not self.zpl_code
+
+        if update_fields is not None:
+            uf = set(update_fields)
+            # Persistencia pura de etiqueta ya generada (regenerate manual/bulk).
+            label_persist_only = uf <= {
+                "qr_code_image",
+                "zpl_code",
+                "updated_at",
+            }
+            if label_persist_only:
+                super().save(*args, **kwargs)
+                return
+
+            if uf & self._LABEL_SOURCE_FIELDS:
+                if not is_new and self.pk:
+                    previous_code = (
+                        Position.objects.filter(pk=self.pk)
+                        .values_list("code", flat=True)
+                        .first()
+                    )
+                need_rebuild_code = True
+                need_refresh_label = True
+            elif uf & {"code", "level"}:
+                if not is_new and self.pk and "code" in uf:
+                    previous_code = (
+                        Position.objects.filter(pk=self.pk)
+                        .values_list("code", flat=True)
+                        .first()
+                    )
+                need_refresh_label = True
+            elif not (uf & self._LABEL_OUTPUT_FIELDS):
+                # Update de flags/status/etc.: no tocar QR/ZPL.
+                need_rebuild_code = False
+                need_refresh_label = False
+        elif not is_new:
+            old = (
+                Position.objects.filter(pk=self.pk)
+                .values("cava_id", "hall", "rack", "level", "place", "code")
+                .first()
             )
+            if old:
+                previous_code = old["code"]
+                slot_changed = (
+                    old["cava_id"] != self.cava_id
+                    or old["hall"] != self.hall
+                    or old["rack"] != self.rack
+                    or old["level"] != self.level
+                    or old["place"] != self.place
+                )
+                if slot_changed:
+                    need_rebuild_code = True
+                    need_refresh_label = True
+                elif old["code"] != self.code or old["level"] != self.level:
+                    need_refresh_label = True
+                else:
+                    need_rebuild_code = False
+                    # Mantener need_refresh_label si faltaba imagen/zpl.
+            else:
+                need_rebuild_code = True
+                need_refresh_label = True
 
-        qr_buffer = services.generate_qr_with_label(
-            self.code, self.code, self.level)
-        filename = f"qrcode-{self.code}.webp"
-        self.qr_code_image.save(filename, File(qr_buffer), save=False)
+        if need_rebuild_code:
+            self.code = self.build_code()
+            need_refresh_label = True
 
-        self.zpl_code = services.generate_position_tag_zpl(self)
+        if need_refresh_label:
+            self.refresh_label(persist=False)
+            if update_fields is not None:
+                kwargs["update_fields"] = list(
+                    set(update_fields)
+                    | {"code", "qr_code_image", "zpl_code", "updated_at"}
+                )
 
         super().save(*args, **kwargs)
+
+        # Si cambió el código, refrescar tags de bins que lo muestran.
+        if (
+            need_refresh_label
+            and previous_code
+            and previous_code != self.code
+            and self.pk
+        ):
+            from apps.inventory.models import Bin
+
+            for bin_obj in Bin.objects.filter(position_id=self.pk).iterator():
+                bin_obj.generate_tag()
 
     def __str__(self):
         return self.code

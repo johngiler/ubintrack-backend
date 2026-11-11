@@ -1,0 +1,98 @@
+"""Runners de operaciones masivas de bins."""
+
+from __future__ import annotations
+
+from typing import Any
+
+from django.utils import timezone
+
+from apps.common.models import BulkOperationJob
+from apps.common.utils.zebra import print_to_zebra
+from apps.core import choices
+from apps.inventory import models as inventory_models
+from apps.order.models import ExitProduct
+from apps.storage.models import Position
+
+
+def run_bin_regenerate_tags(job: BulkOperationJob) -> dict[str, Any]:
+    ids = job.item_ids or []
+    qs = inventory_models.Bin.objects.filter(
+        id__in=ids, workspace=job.workspace
+    )
+    regenerated = 0
+    failed_codes: list[str] = []
+    for bin_obj in qs.iterator():
+        if bin_obj.generate_tag():
+            regenerated += 1
+        else:
+            failed_codes.append(bin_obj.code)
+    missing = len(ids) - qs.count()
+    parts = [f"Se regeneraron {regenerated} etiquetas."]
+    if failed_codes:
+        parts.append(f"{len(failed_codes)} no se pudieron regenerar.")
+    if missing:
+        parts.append(f"{missing} no encontrados.")
+    return {
+        "regenerated": regenerated,
+        "failed": len(failed_codes),
+        "failed_codes": failed_codes[:50],
+        "message": " ".join(parts),
+    }
+
+
+def run_bin_print(job: BulkOperationJob) -> dict[str, Any]:
+    ids = job.item_ids or []
+    bins = list(
+        inventory_models.Bin.objects.filter(id__in=ids, workspace=job.workspace)
+        .only("id", "code", "zpl_code")
+        .order_by("code")
+    )
+    skipped = [b.code for b in bins if not b.zpl_code]
+    zpl_jobs = [b.zpl_code for b in bins if b.zpl_code]
+    if not zpl_jobs:
+        raise RuntimeError("Ningún bin tiene etiqueta para imprimir.")
+    if not print_to_zebra("\n".join(zpl_jobs)):
+        raise RuntimeError("Error al enviar a la impresora. Verifique la conexión.")
+    parts = [f"Se enviaron {len(zpl_jobs)} etiquetas."]
+    if skipped:
+        parts.append(f"{len(skipped)} sin ZPL.")
+    return {
+        "printed": len(zpl_jobs),
+        "skipped": skipped,
+        "message": " ".join(parts),
+    }
+
+
+def run_bin_delete(job: BulkOperationJob) -> dict[str, Any]:
+    ids = job.item_ids or []
+    qs = inventory_models.Bin.objects.filter(id__in=ids, workspace=job.workspace)
+    found_ids = set(qs.values_list("id", flat=True))
+    missing = len(ids) - len(found_ids)
+    blocked = 0
+    deleted = 0
+    for bin_obj in qs.iterator():
+        if bin_obj.status == choices.BinStatus.ALMACENADO:
+            has_exit_products = ExitProduct.objects.filter(
+                bin_product__bin=bin_obj,
+                exit_product_group__exit__status__in=["pendiente", "en_progreso"],
+            ).exists()
+            if has_exit_products:
+                blocked += 1
+                continue
+        if bin_obj.position_id:
+            Position.objects.filter(pk=bin_obj.position_id).update(
+                status=choices.PositionStatus.LIBRE,
+                updated_at=timezone.now(),
+            )
+        bin_obj.delete()
+        deleted += 1
+    parts = [f"Se eliminaron {deleted} bins."]
+    if blocked:
+        parts.append(f"{blocked} con salidas asociadas.")
+    if missing:
+        parts.append(f"{missing} no encontrados.")
+    return {
+        "deleted": deleted,
+        "blocked": blocked,
+        "message": " ".join(parts),
+    }
