@@ -370,11 +370,17 @@ def build_warehouse_structure(workspace) -> dict | None:
             'blocks': [
                 {
                     'id': block.id,
+                    'sort_order': block.sort_order,
                     'kind': block.kind,
+                    'section_type': block.section_type,
+                    'name': block.name,
                     'code': block.code,
                     'rack_count': block.rack_count,
                     'levels': block.levels,
                     'depth': block.depth,
+                    'overlap': block.overlap,
+                    'always_visible': block.always_visible,
+                    'stretch_full': block.stretch_full,
                     'orientation': block.orientation,
                     'label_side': block.label_side,
                     'aisle_code': block.aisle_code,
