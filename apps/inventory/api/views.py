@@ -598,8 +598,14 @@ class BinViewSet(ClientScopeMixin, viewsets.ModelViewSet):
         bin_instance = self.get_object()
         success = bin_instance.generate_tag()
         if success:
-            bin_instance.refresh_from_db(fields=["tag_image", "zpl_code"])
-            tag_url = bin_instance.tag_image.url if bin_instance.tag_image else None
+            bin_instance.refresh_from_db(fields=["tag_image", "zpl_code", "updated_at"])
+            from apps.common.utils.media_layout import media_url_with_bust
+
+            tag_url = media_url_with_bust(
+                bin_instance.tag_image,
+                request=request,
+                version=bin_instance.updated_at,
+            )
             return Response({
                 "success": True,
                 "message": "Etiqueta regenerada.",

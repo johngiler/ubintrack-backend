@@ -387,6 +387,9 @@ class Position(BaseModel):
         self.qr_code_image.save(filename, File(qr_buffer), save=False)
         self.zpl_code = services.generate_position_tag_zpl(self)
         if persist:
+            from django.utils import timezone
+
+            self.updated_at = timezone.now()
             models.Model.save(
                 self,
                 update_fields=["qr_code_image", "zpl_code", "updated_at"],

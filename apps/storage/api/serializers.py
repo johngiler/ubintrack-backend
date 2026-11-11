@@ -322,6 +322,16 @@ class PositionSerializer(serializers.ModelSerializer):
     hall = TokenField(max_length=32, allow_blank=True, required=False)
     rack = TokenField(max_length=32)
     place = TokenField(max_length=32)
+    qr_code_image = serializers.SerializerMethodField()
+
+    def get_qr_code_image(self, obj):
+        from apps.common.utils.media_layout import media_url_with_bust
+
+        return media_url_with_bust(
+            obj.qr_code_image,
+            request=self.context.get("request"),
+            version=getattr(obj, "updated_at", None),
+        )
 
     def validate_rack(self, value):
         return str(value).strip()

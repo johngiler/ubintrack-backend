@@ -652,8 +652,14 @@ class PositionViewSet(WorkspaceScopeMixin, viewsets.ModelViewSet):
 
         position = self.get_object()
         position.refresh_label(persist=True)
-        position.refresh_from_db(fields=["qr_code_image", "zpl_code"])
-        qr_url = position.qr_code_image.url if position.qr_code_image else None
+        position.refresh_from_db(fields=["qr_code_image", "zpl_code", "updated_at"])
+        from apps.common.utils.media_layout import media_url_with_bust
+
+        qr_url = media_url_with_bust(
+            position.qr_code_image,
+            request=request,
+            version=position.updated_at,
+        )
         return Response({
             "success": True,
             "message": "Etiqueta regenerada.",

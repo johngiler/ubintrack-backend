@@ -213,6 +213,7 @@ class Bin(BaseModel):
         self.tag_image.name = os.path.relpath(tag_path, settings.MEDIA_ROOT)
         self.zpl_code = services.generate_bin_tag_zpl(self)
         if persist:
+            self.updated_at = timezone.now()
             models.Model.save(
                 self,
                 update_fields=["tag_image", "zpl_code", "updated_at"],

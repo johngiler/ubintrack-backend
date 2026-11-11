@@ -274,6 +274,7 @@ class BinSerializer(serializers.ModelSerializer):
         many=True, read_only=True)
     position = PositionSimpleSerializer(read_only=True)
     related_exits = serializers.SerializerMethodField()
+    tag_image = serializers.SerializerMethodField()
 
     client_id = serializers.PrimaryKeyRelatedField(
         queryset=core_models.Client.objects.all(),
@@ -299,6 +300,15 @@ class BinSerializer(serializers.ModelSerializer):
         model = inventory_models.Bin
         exclude = ('created_by', 'updated_by',)
         read_only_fields = ('workspace', 'code', 'created_at', 'updated_at')
+
+    def get_tag_image(self, obj):
+        from apps.common.utils.media_layout import media_url_with_bust
+
+        return media_url_with_bust(
+            obj.tag_image,
+            request=self.context.get("request"),
+            version=getattr(obj, "updated_at", None),
+        )
 
     def get_related_exits(self, obj):
         """Obtiene las órdenes de salida relacionadas a este bin"""

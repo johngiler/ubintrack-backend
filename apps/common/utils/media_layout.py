@@ -245,6 +245,27 @@ def wms_exit_pdf_upload(instance, filename: str) -> str:
     return build_wms_exit_pdf_relative(exit_order)
 
 
+def media_url_with_bust(file_field, *, request=None, version=None) -> str | None:
+    """URL absoluta del FileField con ``?t=`` para invalidar caché del navegador."""
+    if not file_field:
+        return None
+    try:
+        url = file_field.url
+    except ValueError:
+        return None
+    if request is not None:
+        url = request.build_absolute_uri(url)
+    token = version
+    if token is None:
+        token = ""
+    else:
+        token = str(int(token.timestamp()) if hasattr(token, "timestamp") else token)
+    if token:
+        sep = "&" if "?" in url else "?"
+        url = f"{url}{sep}t={token}"
+    return url
+
+
 def ensure_media_parent_dir(relative_path: str) -> str:
     """Devuelve ruta absoluta; crea directorios padre si hace falta."""
     from django.conf import settings

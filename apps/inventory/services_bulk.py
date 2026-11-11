@@ -16,12 +16,15 @@ from apps.storage.models import Position
 
 def run_bin_regenerate_tags(job: BulkOperationJob) -> dict[str, Any]:
     ids = job.item_ids or []
-    qs = inventory_models.Bin.objects.filter(
-        id__in=ids, workspace=job.workspace
+    qs = (
+        inventory_models.Bin.objects.filter(id__in=ids, workspace=job.workspace)
+        .select_related("client", "client__workspace", "position")
+        .prefetch_related("bin_products__entry_product__product")
     )
     regenerated = 0
     failed_codes: list[str] = []
-    for bin_obj in qs.iterator():
+    # Lista materializada: el prefetch no aplica bien con iterator().
+    for bin_obj in qs:
         if bin_obj.generate_tag():
             regenerated += 1
         else:
