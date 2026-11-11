@@ -182,56 +182,17 @@ def build_position_code(
 
 
 def generate_position_tag_zpl(position):
-    """
-    Genera el código ZPL para una etiqueta de posición simplificada.
-    Solo contiene NIVEL, QR y NOMENCLATURA.
-    Centrado horizontalmente en toda la etiqueta.
-    """
-    # Obtener información principal
-    code = position.code
-    level = position.level
+    """ZPL de posición para etiqueta 4×2" @ 203 DPI (texto izq. + QR der., casi a sangre)."""
+    code = str(position.code or "").replace("^", " ").replace("~", " ")
+    level = str(position.level or "").replace("^", " ").replace("~", " ")
 
-    # Dimensiones totales de la etiqueta (4x6 pulgadas a 203 DPI)
-    total_width = 812   # 4 pulgadas a 203 DPI
-    total_height = 1218  # 6 pulgadas a 203 DPI
-
-    # Centro horizontal de la etiqueta
-    center_x = total_width / 2
-
-    # Posiciones verticales - ajustadas para que aparezcan en la parte superior
-    # pero con suficiente espacio entre elementos
-    top_margin = 40     # Margen superior
-    title_y = top_margin
-    qr_y = title_y + 60     # Espacio después del título
-    code_y = qr_y + 240     # Espacio después del QR
-
-    # Tamaños de elementos - estimaciones basadas en la imagen
-    nivel_width = 92   # Ancho aproximado del texto "NIVEL X"
-    code_width = 150    # Ancho aproximado del código
-    qr_width = 88     # Ancho aproximado del QR
-
-    # Calcular posiciones horizontales para centrado perfecto
-    title_x = center_x - nivel_width
-    qr_x = center_x - qr_width
-    code_x = center_x - code_width
-
-    # Configuración de la etiqueta
-    zpl = f"""
-^XA
-^PW{total_width}    ; Ancho de la etiqueta (4 pulgadas)
-^LL{total_height}   ; Largo de la etiqueta (6 pulgadas)
-^CF0,45   ; Fuente por defecto y tamaño
-
-; Título: NIVEL
-^FO{title_x},{title_y}^A0N,55,55^FDNIVEL {level}^FS
-
-; QR Code
-^FO{qr_x},{qr_y}^BQN,1,8^FDMA,{code}^FS
-
-; Código de posición
-^FO{code_x},{code_y}^A0N,55,55^FD{code}^FS
-
+    # 4" × 2" @ 203 DPI
+    return f"""^XA
+^PW812
+^LL406
+^LH0,0
+^FO16,50^A0N,70,70^FDNIVEL {level}^FS
+^FO16,160^A0N,42,42^FD{code}^FS
+^FO500,28^BQN,2,7^FDMA,{code}^FS
 ^XZ
 """
-
-    return zpl
