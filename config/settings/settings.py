@@ -59,6 +59,7 @@ INSTALLED_APPS = [
     "apps.task",
     "apps.dashboard",
     "apps.notifications.apps.NotificationsConfig",
+    "apps.audit.apps.AuditConfig",
 ]
 
 MIDDLEWARE = [

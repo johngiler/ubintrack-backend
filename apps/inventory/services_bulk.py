@@ -23,10 +23,14 @@ def run_bin_regenerate_tags(job: BulkOperationJob) -> dict[str, Any]:
     )
     regenerated = 0
     failed_codes: list[str] = []
+    items: list[dict] = []
     # Lista materializada: el prefetch no aplica bien con iterator().
     for bin_obj in qs:
         if bin_obj.generate_tag():
             regenerated += 1
+            items.append(
+                {"resource_id": bin_obj.pk, "resource_code": bin_obj.code or ""}
+            )
         else:
             failed_codes.append(bin_obj.code)
     missing = len(ids) - qs.count()
@@ -39,6 +43,7 @@ def run_bin_regenerate_tags(job: BulkOperationJob) -> dict[str, Any]:
         "regenerated": regenerated,
         "failed": len(failed_codes),
         "failed_codes": failed_codes[:50],
+        "items": items,
         "message": " ".join(parts),
     }
 
@@ -51,7 +56,8 @@ def run_bin_print(job: BulkOperationJob) -> dict[str, Any]:
         .order_by("code")
     )
     skipped = [b.code for b in bins if not b.zpl_code]
-    zpl_jobs = [b.zpl_code for b in bins if b.zpl_code]
+    printable = [b for b in bins if b.zpl_code]
+    zpl_jobs = [b.zpl_code for b in printable]
     if not zpl_jobs:
         raise RuntimeError("Ningún bin tiene etiqueta para imprimir.")
     if not print_to_zebra("\n".join(zpl_jobs)):
@@ -64,6 +70,9 @@ def run_bin_print(job: BulkOperationJob) -> dict[str, Any]:
     return {
         "printed": len(zpl_jobs),
         "skipped": skipped,
+        "items": [
+            {"resource_id": b.pk, "resource_code": b.code or ""} for b in printable
+        ],
         "message": " ".join(parts),
     }
 
@@ -75,6 +84,7 @@ def run_bin_delete(job: BulkOperationJob) -> dict[str, Any]:
     missing = len(ids) - len(found_ids)
     blocked = 0
     deleted = 0
+    items: list[dict] = []
     for bin_obj in qs.iterator():
         if bin_obj.status == choices.BinStatus.ALMACENADO:
             has_exit_products = ExitProduct.objects.filter(
@@ -89,6 +99,7 @@ def run_bin_delete(job: BulkOperationJob) -> dict[str, Any]:
                 status=choices.PositionStatus.LIBRE,
                 updated_at=timezone.now(),
             )
+        items.append({"resource_id": bin_obj.pk, "resource_code": bin_obj.code or ""})
         bin_obj.delete()
         deleted += 1
     parts = [f"Se eliminaron {deleted} bins."]
@@ -98,6 +109,7 @@ def run_bin_delete(job: BulkOperationJob) -> dict[str, Any]:
         parts.append(f"{missing} no encontrados.")
     return {
         "deleted": deleted,
+        "items": items,
         "blocked": blocked,
         "message": " ".join(parts),
     }

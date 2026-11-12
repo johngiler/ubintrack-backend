@@ -505,3 +505,72 @@ class Position(BaseModel):
 
     def __str__(self):
         return self.code
+
+
+class PositionMovementType(models.TextChoices):
+    CREATED = "created", "Creada"
+    STATUS_CHANGED = "status_changed", "Cambio de Estado"
+    FLAGS_CHANGED = "flags_changed", "Cambio de flags"
+    LABEL_REGENERATED = "label_regenerated", "Etiqueta regenerada"
+    PRINTED = "printed", "Impresa"
+    DELETED = "deleted", "Eliminada"
+    BIN_LINKED = "bin_linked", "Bin vinculado"
+    BIN_UNLINKED = "bin_unlinked", "Bin desvinculado"
+
+
+class PositionMovement(BaseModel):
+    """Timeline por posición (incluye cascadas operativas desde bins)."""
+
+    position = models.ForeignKey(
+        Position,
+        on_delete=models.CASCADE,
+        related_name="movements",
+        verbose_name="posición",
+    )
+    movement_type = models.CharField(
+        max_length=32,
+        choices=PositionMovementType.choices,
+        verbose_name="tipo de movimiento",
+    )
+    old_status = models.CharField(
+        max_length=15,
+        choices=choices.PositionStatus.choices,
+        null=True,
+        blank=True,
+    )
+    new_status = models.CharField(
+        max_length=15,
+        choices=choices.PositionStatus.choices,
+        null=True,
+        blank=True,
+    )
+    bin = models.ForeignKey(
+        "inventory.Bin",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="position_movements",
+    )
+    bin_code = models.CharField(max_length=100, blank=True, default="")
+    notes = models.TextField(blank=True, null=True)
+    changes = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        verbose_name = "movimiento de posición"
+        verbose_name_plural = "movimientos de posición"
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["position", "-created_at"]),
+            models.Index(fields=["movement_type"]),
+        ]
+
+    def __str__(self):
+        return f"{self.position_id} - {self.get_movement_type_display()} - {self.created_at}"
+
+    @classmethod
+    def log_movement(cls, position_obj, movement_type, **kwargs):
+        return cls.objects.create(
+            position=position_obj,
+            movement_type=movement_type,
+            **kwargs,
+        )

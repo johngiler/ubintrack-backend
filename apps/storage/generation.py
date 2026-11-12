@@ -1,7 +1,13 @@
 """Crea las posiciones de una cava a partir de sus bloques."""
 
 from apps.core.choices import PositionStatus
-from apps.storage.models import Cava, CavaBlock, Position
+from apps.storage.models import (
+    Cava,
+    CavaBlock,
+    Position,
+    PositionMovement,
+    PositionMovementType,
+)
 from apps.storage.utils.floor_neighbors import (
     floor_hall_token,
     floor_is_active,
@@ -115,8 +121,9 @@ def sync_positions_for_cava(cava: Cava) -> dict:
         ).delete()
 
     created = 0
+    created_items: list[dict] = []
     for hall, rack, level, place in to_create:
-        Position.objects.create(
+        position = Position.objects.create(
             cava=cava,
             workspace_id=workspace_id,
             hall=hall,
@@ -126,6 +133,10 @@ def sync_positions_for_cava(cava: Cava) -> dict:
             status=PositionStatus.LIBRE,
         )
         created += 1
+        created_items.append(
+            {"resource_id": position.pk, "resource_code": position.code or ""}
+        )
+        PositionMovement.log_movement(position, PositionMovementType.CREATED)
 
     skipped = len(existing) - len(orphans)
     if expected or cava.positions.exists():
@@ -135,6 +146,7 @@ def sync_positions_for_cava(cava: Cava) -> dict:
     return {
         "expected": len(expected),
         "created": created,
+        "created_items": created_items,
         "deleted": deleted,
         "skipped": skipped,
         "blocked": [row.code for row in blocked],

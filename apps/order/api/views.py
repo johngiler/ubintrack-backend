@@ -82,8 +82,21 @@ class EntryViewSet(ClientScopeMixin, viewsets.ModelViewSet):
         entry = serializer.save(
             client=client or serializer.validated_data.get('client'))
         from apps.notifications.services import notify_entry_created
+        from apps.order.models import EntryMovement, EntryMovementType
+        from apps.audit.models import ActivitySection
+        from apps.audit.services.view_log import log_unit, workspace_from_client
 
         notify_entry_created(entry=entry, actor=user)
+        EntryMovement.log_movement(entry, EntryMovementType.CREATED)
+        log_unit(
+            workspace=workspace_from_client(entry.client),
+            section=ActivitySection.ENTRY,
+            action="create",
+            summary=f"{(getattr(user, 'get_full_name', lambda: '')() or '').strip() or user.username} registró la entrada {entry.code}",
+            actor=user,
+            resource_id=entry.pk,
+            resource_code=entry.code,
+        )
 
     def perform_update(self, serializer):
         from rest_framework.exceptions import ValidationError
@@ -119,9 +132,52 @@ class EntryViewSet(ClientScopeMixin, viewsets.ModelViewSet):
             if 'status' in serializer.validated_data and new_status not in ('pendiente', 'cancelada'):
                 raise ValidationError(
                     {'status': 'Usuarios cliente solo pueden establecer estados "pendiente" o "cancelada".'})
-            serializer.save(client=get_user_client(user))
+            entry = serializer.save(client=get_user_client(user))
         else:
-            serializer.save()
+            entry = serializer.save()
+
+        from apps.order.models import EntryMovement, EntryMovementType
+        from apps.audit.models import ActivitySection
+        from apps.audit.services.view_log import log_unit, workspace_from_client
+
+        actor_name = (
+            (getattr(user, "get_full_name", lambda: "")() or "").strip()
+            or getattr(user, "username", None)
+            or "Usuario"
+        )
+        if old_status != entry.status:
+            from apps.notifications.services import notify_entry_status
+
+            notify_entry_status(entry=entry, new_status=entry.status, actor=user)
+            EntryMovement.log_movement(
+                entry,
+                EntryMovementType.STATUS_CHANGED,
+                old_status=old_status,
+                new_status=entry.status,
+            )
+            log_unit(
+                workspace=workspace_from_client(entry.client),
+                section=ActivitySection.ENTRY,
+                action="status",
+                summary=f"{actor_name} cambió la entrada {entry.code} a {entry.status}",
+                actor=user,
+                resource_id=entry.pk,
+                resource_code=entry.code,
+            )
+        else:
+            from apps.notifications.services import notify_entry_updated
+
+            notify_entry_updated(entry=entry, actor=user)
+            EntryMovement.log_movement(entry, EntryMovementType.UPDATED)
+            log_unit(
+                workspace=workspace_from_client(entry.client),
+                section=ActivitySection.ENTRY,
+                action="update",
+                summary=f"{actor_name} actualizó la entrada {entry.code}",
+                actor=user,
+                resource_id=entry.pk,
+                resource_code=entry.code,
+            )
 
     def perform_destroy(self, instance):
         from rest_framework.exceptions import ValidationError
@@ -139,8 +195,51 @@ class EntryViewSet(ClientScopeMixin, viewsets.ModelViewSet):
                 'No se puede eliminar la entrada porque tiene bins asociados. Primero elimine los bins.'
             )
 
-        # Si pasa las validaciones, eliminar
+        from apps.notifications.services import notify_entry_deleted
+        from apps.audit.models import ActivitySection
+        from apps.audit.services.view_log import log_unit
+
+        workspace = getattr(getattr(instance, "client", None), "workspace", None)
+        code = getattr(instance, "code", "") or str(instance.pk)
+        pk = instance.pk
+        user = self.request.user
+        actor_name = (
+            (getattr(user, "get_full_name", lambda: "")() or "").strip()
+            or getattr(user, "username", None)
+            or "Usuario"
+        )
         instance.delete()
+        notify_entry_deleted(
+            workspace=workspace,
+            code=code,
+            resource_id=pk,
+            actor=user,
+        )
+        log_unit(
+            workspace=workspace,
+            section=ActivitySection.ENTRY,
+            action="delete",
+            summary=f"{actor_name} eliminó la entrada {code}",
+            actor=user,
+            resource_id=pk,
+            resource_code=code,
+        )
+
+    @action(detail=True, methods=["get"], url_path="movements")
+    def movements(self, request, pk=None):
+        """Historial paginado de la entrada (lazy desde la pestaña del modal)."""
+        from apps.common.utils.movements_pagination import paginated_movements_response
+
+        entry = self.get_object()
+        movements = order_models.EntryMovement.objects.filter(
+            entry=entry
+        ).select_related("created_by").order_by("-created_at")
+        return paginated_movements_response(
+            request,
+            queryset=movements,
+            serializer_class=serializers.EntryMovementSerializer,
+            meta={"entry_id": entry.id, "entry_code": entry.code},
+        )
 
     @action(detail=False, methods=['get'])
     def export_excel(self, request):
@@ -465,8 +564,24 @@ class ExitViewSet(ClientScopeMixin, viewsets.ModelViewSet):
         exit_order = serializer.save(
             client=client or serializer.validated_data.get('client'))
         from apps.notifications.services import notify_exit_created
+        from apps.audit.models import ActivitySection
+        from apps.audit.services.view_log import log_unit, workspace_from_client
 
         notify_exit_created(exit_order=exit_order, actor=user)
+        actor_name = (
+            (getattr(user, "get_full_name", lambda: "")() or "").strip()
+            or getattr(user, "username", None)
+            or "Usuario"
+        )
+        log_unit(
+            workspace=workspace_from_client(exit_order.client),
+            section=ActivitySection.EXIT,
+            action="create",
+            summary=f"{actor_name} registró la salida {exit_order.code}",
+            actor=user,
+            resource_id=exit_order.pk,
+            resource_code=exit_order.code,
+        )
 
     # Eliminar la primera versión duplicada de perform_update y consolidar lógica aquí
     def perform_update(self, serializer):
@@ -528,6 +643,45 @@ class ExitViewSet(ClientScopeMixin, viewsets.ModelViewSet):
         if (old_status != 'completada' and updated_instance.status == 'completada'):
             updated_instance.update_bins_to_dispatched_if_all_processed()
 
+        from apps.audit.models import ActivitySection
+        from apps.audit.services.view_log import log_unit, workspace_from_client
+
+        actor_name = (
+            (getattr(user, "get_full_name", lambda: "")() or "").strip()
+            or getattr(user, "username", None)
+            or "Usuario"
+        )
+        if old_status != updated_instance.status:
+            from apps.notifications.services import notify_exit_status
+
+            notify_exit_status(
+                exit_order=updated_instance,
+                new_status=updated_instance.status,
+                actor=user,
+            )
+            log_unit(
+                workspace=workspace_from_client(updated_instance.client),
+                section=ActivitySection.EXIT,
+                action="status",
+                summary=f"{actor_name} cambió la salida {updated_instance.code} a {updated_instance.status}",
+                actor=user,
+                resource_id=updated_instance.pk,
+                resource_code=updated_instance.code,
+            )
+        else:
+            from apps.notifications.services import notify_exit_updated
+
+            notify_exit_updated(exit_order=updated_instance, actor=user)
+            log_unit(
+                workspace=workspace_from_client(updated_instance.client),
+                section=ActivitySection.EXIT,
+                action="update",
+                summary=f"{actor_name} actualizó la salida {updated_instance.code}",
+                actor=user,
+                resource_id=updated_instance.pk,
+                resource_code=updated_instance.code,
+            )
+
     def perform_destroy(self, instance):
         from rest_framework.exceptions import ValidationError
 
@@ -548,8 +702,35 @@ class ExitViewSet(ClientScopeMixin, viewsets.ModelViewSet):
                 'No se puede eliminar la salida porque tiene bins procesados. Primero reverse los bins procesados.'
             )
 
-        # Si pasa las validaciones, eliminar
+        from apps.notifications.services import notify_exit_deleted
+        from apps.audit.models import ActivitySection
+        from apps.audit.services.view_log import log_unit
+
+        workspace = getattr(getattr(instance, "client", None), "workspace", None)
+        code = getattr(instance, "code", "") or str(instance.pk)
+        pk = instance.pk
+        user = self.request.user
+        actor_name = (
+            (getattr(user, "get_full_name", lambda: "")() or "").strip()
+            or getattr(user, "username", None)
+            or "Usuario"
+        )
         instance.delete()
+        notify_exit_deleted(
+            workspace=workspace,
+            code=code,
+            resource_id=pk,
+            actor=user,
+        )
+        log_unit(
+            workspace=workspace,
+            section=ActivitySection.EXIT,
+            action="delete",
+            summary=f"{actor_name} eliminó la salida {code}",
+            actor=user,
+            resource_id=pk,
+            resource_code=code,
+        )
 
     @action(detail=True, methods=['post'])
     def complete(self, request, pk=None):
@@ -584,6 +765,31 @@ class ExitViewSet(ClientScopeMixin, viewsets.ModelViewSet):
 
         # Ejecutar lógica de despacho de bins
         exit_obj.update_bins_to_dispatched_if_all_processed()
+
+        from apps.notifications.services import notify_exit_status
+        from apps.audit.models import ActivitySection
+        from apps.audit.services.view_log import log_unit, workspace_from_client
+
+        notify_exit_status(
+            exit_order=exit_obj,
+            new_status=exit_obj.status,
+            actor=request.user,
+        )
+        user = request.user
+        actor_name = (
+            (getattr(user, "get_full_name", lambda: "")() or "").strip()
+            or getattr(user, "username", None)
+            or "Usuario"
+        )
+        log_unit(
+            workspace=workspace_from_client(exit_obj.client),
+            section=ActivitySection.EXIT,
+            action="status",
+            summary=f"{actor_name} cambió la salida {exit_obj.code} a {exit_obj.status}",
+            actor=user,
+            resource_id=exit_obj.pk,
+            resource_code=exit_obj.code,
+        )
 
         # Generar PDF de forma síncrona
         pdf_url = None
@@ -732,16 +938,10 @@ class ExitViewSet(ClientScopeMixin, viewsets.ModelViewSet):
 
     @action(detail=True, methods=['get'], url_path='movements')
     def movements(self, request, pk=None):
-        """
-        Obtiene el historial de movimientos de una orden de salida específica.
-        Retorna una línea de tiempo con todos los eventos: creación, cambios de estado,
-        asignaciones de bins, procesamiento, reversiones, reemplazos, etc.
-        """
-        from rest_framework.response import Response
+        """Historial paginado de la salida (lazy desde la pestaña del modal)."""
+        from apps.common.utils.movements_pagination import paginated_movements_response
 
         exit_instance = self.get_object()
-
-        # Obtener todos los movimientos de la salida ordenados por fecha (más recientes primero)
         movements = order_models.ExitMovement.objects.filter(
             exit=exit_instance
         ).select_related(
@@ -751,14 +951,12 @@ class ExitViewSet(ClientScopeMixin, viewsets.ModelViewSet):
             'bin__position',
         ).order_by('-created_at')
 
-        serializer = serializers.ExitMovementSerializer(movements, many=True)
-
-        return Response({
-            'exit_id': exit_instance.id,
-            'exit_code': exit_instance.code,
-            'movements': serializer.data,
-            'total': movements.count()
-        })
+        return paginated_movements_response(
+            request,
+            queryset=movements,
+            serializer_class=serializers.ExitMovementSerializer,
+            meta={"exit_id": exit_instance.id, "exit_code": exit_instance.code},
+        )
 
 
 class ExitProductViewSet(ClientScopeMixin, viewsets.ModelViewSet):
@@ -773,6 +971,42 @@ class ExitProductViewSet(ClientScopeMixin, viewsets.ModelViewSet):
 
     def get_queryset(self):
         return self.scope_to_user(super().get_queryset())
+
+    def _log_exit_business(self, exit_product_id, action: str, verb: str, extra: dict | None = None):
+        """Eco macro en historial de salidas (detalle rico queda en ExitMovement)."""
+        from apps.audit.models import ActivitySection
+        from apps.audit.services.view_log import log_unit, workspace_from_client
+
+        try:
+            ep = order_models.ExitProduct.objects.select_related(
+                "exit_product_group__exit__client",
+                "bin_product__bin",
+            ).get(pk=exit_product_id)
+        except order_models.ExitProduct.DoesNotExist:
+            return
+        exit_obj = ep.exit_product_group.exit
+        user = self.request.user
+        actor_name = (
+            (getattr(user, "get_full_name", lambda: "")() or "").strip()
+            or getattr(user, "username", None)
+            or "Usuario"
+        )
+        bin_code = ""
+        if extra and extra.get("bin_code"):
+            bin_code = str(extra.get("bin_code") or "")
+        elif ep.bin_product_id and getattr(ep.bin_product, "bin", None):
+            bin_code = ep.bin_product.bin.code or ""
+        suffix = f" (bin {bin_code})" if bin_code else ""
+        log_unit(
+            workspace=workspace_from_client(exit_obj.client),
+            section=ActivitySection.EXIT,
+            action=action,
+            summary=f"{actor_name} {verb} en salida {exit_obj.code}{suffix}",
+            actor=user,
+            resource_id=exit_obj.pk,
+            resource_code=exit_obj.code or "",
+            changes=extra or {},
+        )
 
     def perform_create(self, serializer):
         user = self.request.user
@@ -801,6 +1035,12 @@ class ExitProductViewSet(ClientScopeMixin, viewsets.ModelViewSet):
                     instance.id,
                     user=self.request.user
                 )
+                self._log_exit_business(
+                    instance.id,
+                    "process",
+                    "procesó un bin",
+                    {"bin_code": (result or {}).get("bin_code")},
+                )
                 # El servicio ya hizo todo, solo retornar
                 return
             except services.TransactionError as e:
@@ -826,6 +1066,12 @@ class ExitProductViewSet(ClientScopeMixin, viewsets.ModelViewSet):
             result = services.process_exit_product_atomic(
                 pk,
                 user=request.user
+            )
+            self._log_exit_business(
+                pk,
+                "process",
+                "procesó un bin",
+                {"bin_code": result.get("bin_code")},
             )
             return Response({
                 'success': True,
@@ -907,6 +1153,12 @@ class ExitProductViewSet(ClientScopeMixin, viewsets.ModelViewSet):
                 pk,
                 user=request.user
             )
+            self._log_exit_business(
+                pk,
+                "reverse",
+                "reversó un bin",
+                {"bin_code": result.get("bin_code")},
+            )
             return Response({
                 'success': True,
                 'message': 'Operación reversada exitosamente',
@@ -937,6 +1189,15 @@ class ExitProductViewSet(ClientScopeMixin, viewsets.ModelViewSet):
             result = services.reassign_exit_product(
                 pk,
                 user=request.user
+            )
+            self._log_exit_business(
+                pk,
+                "reassign",
+                "reasignó un bin",
+                {
+                    "bin_code": result.get("new_bin_code"),
+                    "old_bin_code": result.get("original_bin_code"),
+                },
             )
             return Response({
                 'success': True,
@@ -984,6 +1245,15 @@ class ExitProductViewSet(ClientScopeMixin, viewsets.ModelViewSet):
                 pk,
                 new_bin_code=new_bin_code,
                 user=request.user
+            )
+            self._log_exit_business(
+                pk,
+                "replace",
+                "reemplazó un bin",
+                {
+                    "bin_code": result.get("new_bin_code") or new_bin_code,
+                    "old_bin_code": result.get("original_bin_code"),
+                },
             )
             return Response({
                 'success': True,
@@ -1131,6 +1401,31 @@ class ExitProductGroupViewSet(ClientScopeMixin, viewsets.ModelViewSet):
 
         try:
             result = services.process_exit_products_bulk(pk, user=user)
+            processed = int(result.get("processed") or 0)
+            if processed:
+                from apps.audit.models import ActivitySection
+                from apps.audit.services.view_log import log_unit, workspace_from_client
+
+                group = self.get_object()
+                exit_obj = group.exit
+                actor_name = (
+                    (getattr(user, "get_full_name", lambda: "")() or "").strip()
+                    or getattr(user, "username", None)
+                    or "Usuario"
+                )
+                log_unit(
+                    workspace=workspace_from_client(exit_obj.client),
+                    section=ActivitySection.EXIT,
+                    action="process",
+                    summary=(
+                        f"{actor_name} procesó {processed} bins "
+                        f"en salida {exit_obj.code}"
+                    ),
+                    actor=user,
+                    resource_id=exit_obj.pk,
+                    resource_code=exit_obj.code or "",
+                    changes={"processed": processed, "failed": result.get("failed")},
+                )
             return Response(result, status=status.HTTP_200_OK)
         except (DjangoValidationError, DRFValidationError) as e:
             return Response(

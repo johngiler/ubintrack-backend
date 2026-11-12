@@ -106,6 +106,12 @@ def execute_bulk_job(
     job.status = BulkOperationJob.Status.SUCCEEDED
     job.error_message = ""
     job.save(update_fields=["result", "status", "error_message", "updated_at"])
+    try:
+        from apps.notifications.services import notify_bulk_job_finished
+
+        notify_bulk_job_finished(job)
+    except Exception:
+        logger.exception("No se pudo notificar bulk job %s", job_id)
     return job
 
 

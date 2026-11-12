@@ -36,19 +36,65 @@ class ProductViewSet(ClientScopeMixin, viewsets.ModelViewSet):
         return self.scope_to_user(super().get_queryset())
 
     def perform_create(self, serializer):
+        from apps.audit.services.crud_hooks import SECTION, log_crud
+
         user = self.request.user
         client = None
         if is_client_user(user):
             client = get_user_client(user)
-        serializer.save(
+        obj = serializer.save(
             client=client or serializer.validated_data.get('client'))
+        ws = getattr(getattr(obj, "client", None), "workspace", None)
+        label = obj.name or obj.client_sku or str(obj.pk)
+        log_crud(
+            workspace=ws,
+            section=SECTION.PRODUCT,
+            action="create",
+            verb="creó el producto",
+            label=label,
+            actor=user,
+            resource_id=obj.pk,
+            resource_code=label,
+        )
 
     def perform_update(self, serializer):
+        from apps.audit.services.crud_hooks import SECTION, log_crud
+
         user = self.request.user
         if is_client_user(user):
-            serializer.save(client=get_user_client(user))
+            obj = serializer.save(client=get_user_client(user))
         else:
-            serializer.save()
+            obj = serializer.save()
+        ws = getattr(getattr(obj, "client", None), "workspace", None)
+        label = obj.name or obj.client_sku or str(obj.pk)
+        log_crud(
+            workspace=ws,
+            section=SECTION.PRODUCT,
+            action="update",
+            verb="actualizó el producto",
+            label=label,
+            actor=user,
+            resource_id=obj.pk,
+            resource_code=label,
+        )
+
+    def perform_destroy(self, instance):
+        from apps.audit.services.crud_hooks import SECTION, log_crud
+
+        ws = getattr(getattr(instance, "client", None), "workspace", None)
+        label = instance.name or instance.client_sku or str(instance.pk)
+        pk = instance.pk
+        instance.delete()
+        log_crud(
+            workspace=ws,
+            section=SECTION.PRODUCT,
+            action="delete",
+            verb="eliminó el producto",
+            label=label,
+            actor=self.request.user,
+            resource_id=pk,
+            resource_code=label,
+        )
 
     @action(detail=False, methods=['get'])
     def export_excel(self, request):
@@ -279,6 +325,43 @@ class BinViewSet(ClientScopeMixin, viewsets.ModelViewSet):
         ]
         if blocked:
             parts.append(f"{blocked} con salidas asociadas.")
+        if updated:
+            from apps.audit.models import ActivityBatch, ActivitySection
+            from apps.audit.services.view_log import log_bulk
+            from apps.notifications.models import Notification
+            from apps.notifications.services import notify_bins_bulk
+            from apps.workspaces.utils.tenant import get_workspace_for_request
+
+            ws = get_workspace_for_request(request)
+            verb = "activó" if is_active else "desactivó"
+            noun = "bin" if updated == 1 else "bins"
+            actor_name = (
+                (getattr(request.user, "get_full_name", lambda: "")() or "").strip()
+                or getattr(request.user, "username", None)
+                or "Usuario"
+            )
+            message = f"{actor_name} {verb} {updated} {noun}"
+            notify_bins_bulk(
+                workspace=ws,
+                event=Notification.Event.UPDATED,
+                message=message,
+                count=updated,
+                actor=request.user,
+            )
+            items = [
+                {"resource_id": pk, "resource_code": code or ""}
+                for pk, code in qs.values_list("id", "code")[: max(updated, 1)]
+            ]
+            if items:
+                log_bulk(
+                    workspace=ws,
+                    section=ActivitySection.BIN,
+                    action="bulk_flags",
+                    kind=ActivityBatch.Kind.BULK_FLAGS,
+                    summary=message,
+                    items=items,
+                    actor=request.user,
+                )
         return Response(
             {
                 "success": True,
@@ -308,8 +391,27 @@ class BinViewSet(ClientScopeMixin, viewsets.ModelViewSet):
         bin_obj = serializer.save(
             client=client or serializer.validated_data.get('client'))
         from apps.notifications.services import notify_bin_created
+        from apps.audit.models import ActivitySection
+        from apps.audit.services.view_log import log_unit
 
         notify_bin_created(bin_obj=bin_obj, actor=user)
+        actor_name = (
+            (getattr(user, "get_full_name", lambda: "")() or "").strip()
+            or getattr(user, "username", None)
+            or "Usuario"
+        )
+        ws = getattr(bin_obj, "workspace", None) or getattr(
+            getattr(bin_obj, "client", None), "workspace", None
+        )
+        log_unit(
+            workspace=ws,
+            section=ActivitySection.BIN,
+            action="create",
+            summary=f"{actor_name} creó el bin {bin_obj.code}",
+            actor=user,
+            resource_id=bin_obj.pk,
+            resource_code=bin_obj.code,
+        )
 
     @transaction.atomic
     def perform_update(self, serializer):
@@ -336,6 +438,8 @@ class BinViewSet(ClientScopeMixin, viewsets.ModelViewSet):
                                      'Primero elimine o complete las salidas que usan este bin.'
                     })
 
+        old_status = instance.status
+
         # Seguridad adicional: si es usuario cliente y quiere marcar como almacenado, exigir QR válido
         if is_client_user(user):
             new_status = serializer.validated_data.get(
@@ -350,9 +454,50 @@ class BinViewSet(ClientScopeMixin, viewsets.ModelViewSet):
                     raise PermissionDenied(
                         'Validación QR requerida para almacenar el bin.')
 
-            serializer.save(client=get_user_client(user))
+            bin_obj = serializer.save(client=get_user_client(user))
         else:
-            serializer.save()
+            bin_obj = serializer.save()
+
+        from apps.audit.models import ActivitySection
+        from apps.audit.services.view_log import log_unit
+
+        actor_name = (
+            (getattr(user, "get_full_name", lambda: "")() or "").strip()
+            or getattr(user, "username", None)
+            or "Usuario"
+        )
+        ws = getattr(bin_obj, "workspace", None) or getattr(
+            getattr(bin_obj, "client", None), "workspace", None
+        )
+        # Posición libre/ocupado por cascada de bin: no notificar posición (solo el bin).
+        if old_status != bin_obj.status:
+            from apps.notifications.services import notify_bin_status
+
+            notify_bin_status(
+                bin_obj=bin_obj, new_status=bin_obj.status, actor=user
+            )
+            log_unit(
+                workspace=ws,
+                section=ActivitySection.BIN,
+                action="status",
+                summary=f"{actor_name} cambió el bin {bin_obj.code} a {bin_obj.status}",
+                actor=user,
+                resource_id=bin_obj.pk,
+                resource_code=bin_obj.code,
+            )
+        else:
+            from apps.notifications.services import notify_bin_updated
+
+            notify_bin_updated(bin_obj=bin_obj, actor=user)
+            log_unit(
+                workspace=ws,
+                section=ActivitySection.BIN,
+                action="update",
+                summary=f"{actor_name} actualizó el bin {bin_obj.code}",
+                actor=user,
+                resource_id=bin_obj.pk,
+                resource_code=bin_obj.code,
+            )
 
     @action(detail=True, methods=['post'], url_path='store-with-qr')
     @transaction.atomic
@@ -392,14 +537,61 @@ class BinViewSet(ClientScopeMixin, viewsets.ModelViewSet):
         bin_instance.was_qr_validated = True
         bin_instance.save()
 
-        # Asegurar estado de la posición
+        # Asegurar estado de la posición (cascada: no campanita de posición; sí timeline)
         if bin_instance.position:
-            from apps.storage.models import Position
+            from apps.storage.models import Position, PositionMovement, PositionMovementType
             from django.utils import timezone
-            Position.objects.filter(pk=bin_instance.position.pk).update(
+
+            pos = bin_instance.position
+            old_pos_status = pos.status
+            Position.objects.filter(pk=pos.pk).update(
                 status=choices.PositionStatus.OCUPADO,
                 updated_at=timezone.now()
             )
+            if old_pos_status != choices.PositionStatus.OCUPADO:
+                PositionMovement.log_movement(
+                    pos,
+                    PositionMovementType.STATUS_CHANGED,
+                    old_status=old_pos_status,
+                    new_status=choices.PositionStatus.OCUPADO,
+                    bin=bin_instance,
+                    bin_code=bin_instance.code,
+                    notes="Almacenamiento de bin",
+                )
+                PositionMovement.log_movement(
+                    pos,
+                    PositionMovementType.BIN_LINKED,
+                    bin=bin_instance,
+                    bin_code=bin_instance.code,
+                )
+
+        from apps.notifications.services import notify_bin_status
+        from apps.audit.models import ActivitySection
+        from apps.audit.services.view_log import log_unit
+
+        notify_bin_status(
+            bin_obj=bin_instance,
+            new_status=bin_instance.status,
+            actor=request.user,
+        )
+        user = request.user
+        actor_name = (
+            (getattr(user, "get_full_name", lambda: "")() or "").strip()
+            or getattr(user, "username", None)
+            or "Usuario"
+        )
+        ws = getattr(bin_instance, "workspace", None) or getattr(
+            getattr(bin_instance, "client", None), "workspace", None
+        )
+        log_unit(
+            workspace=ws,
+            section=ActivitySection.BIN,
+            action="status",
+            summary=f"{actor_name} cambió el bin {bin_instance.code} a {bin_instance.status}",
+            actor=user,
+            resource_id=bin_instance.pk,
+            resource_code=bin_instance.code,
+        )
 
         return Response({
             'success': True,
@@ -425,16 +617,63 @@ class BinViewSet(ClientScopeMixin, viewsets.ModelViewSet):
                     'Primero elimine o complete las salidas que usan este bin.'
                 )
 
-        # Liberar la posición si existe
+        from apps.notifications.services import notify_bin_deleted
+        from apps.audit.models import ActivitySection
+        from apps.audit.services.view_log import log_unit
+
+        workspace = getattr(instance, "workspace", None)
+        if workspace is None:
+            workspace = getattr(getattr(instance, "client", None), "workspace", None)
+        code = getattr(instance, "code", "") or str(instance.pk)
+        pk = instance.pk
+        user = self.request.user
+        actor_name = (
+            (getattr(user, "get_full_name", lambda: "")() or "").strip()
+            or getattr(user, "username", None)
+            or "Usuario"
+        )
+
+        # Liberar la posición si existe (cascada: timeline sí, campanita no)
         if instance.position:
-            from apps.storage.models import Position
+            from apps.storage.models import Position, PositionMovement, PositionMovementType
             from django.utils import timezone
-            Position.objects.filter(pk=instance.position.pk).update(
+
+            pos = instance.position
+            old_pos_status = pos.status
+            Position.objects.filter(pk=pos.pk).update(
                 status=choices.PositionStatus.LIBRE,
                 updated_at=timezone.now()
             )
-        # Luego eliminar la instancia
+            if old_pos_status != choices.PositionStatus.LIBRE:
+                PositionMovement.log_movement(
+                    pos,
+                    PositionMovementType.STATUS_CHANGED,
+                    old_status=old_pos_status,
+                    new_status=choices.PositionStatus.LIBRE,
+                    bin_code=code,
+                    notes="Eliminación de bin",
+                )
+            PositionMovement.log_movement(
+                pos,
+                PositionMovementType.BIN_UNLINKED,
+                bin_code=code,
+            )
         instance.delete()
+        notify_bin_deleted(
+            workspace=workspace,
+            code=code,
+            resource_id=pk,
+            actor=user,
+        )
+        log_unit(
+            workspace=workspace,
+            section=ActivitySection.BIN,
+            action="delete",
+            summary=f"{actor_name} eliminó el bin {code}",
+            actor=user,
+            resource_id=pk,
+            resource_code=code,
+        )
 
     @action(detail=False, methods=['get'])
     def export_excel(self, request):
@@ -622,13 +861,10 @@ class BinViewSet(ClientScopeMixin, viewsets.ModelViewSet):
 
     @action(detail=True, methods=['get'], url_path='movements')
     def movements(self, request, pk=None):
-        """
-        Obtiene el historial de movimientos de un bin específico.
-        Retorna una línea de tiempo con todos los eventos: creación, cambios de estado y salidas procesadas.
-        """
-        bin_instance = self.get_object()
+        """Historial paginado del bin (lazy desde la pestaña del modal)."""
+        from apps.common.utils.movements_pagination import paginated_movements_response
 
-        # Obtener todos los movimientos del bin ordenados por fecha (más recientes primero)
+        bin_instance = self.get_object()
         movements = inventory_models.BinMovement.objects.filter(
             bin=bin_instance
         ).select_related(
@@ -640,14 +876,12 @@ class BinViewSet(ClientScopeMixin, viewsets.ModelViewSet):
             'bin__bin_products__entry_product__product'
         ).order_by('-created_at')
 
-        serializer = serializers.BinMovementSerializer(movements, many=True)
-
-        return Response({
-            'bin_id': bin_instance.id,
-            'bin_code': bin_instance.code,
-            'movements': serializer.data,
-            'total': movements.count()
-        })
+        return paginated_movements_response(
+            request,
+            queryset=movements,
+            serializer_class=serializers.BinMovementSerializer,
+            meta={"bin_id": bin_instance.id, "bin_code": bin_instance.code},
+        )
 
 
 class BinProductViewSet(ClientScopeMixin, viewsets.ModelViewSet):

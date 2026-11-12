@@ -434,3 +434,42 @@ class PositionSerializer(serializers.ModelSerializer):
             self._sync_conduit_is_push(position, is_push)
             position.refresh_from_db(fields=["is_push", "is_picking"])
         return position
+
+
+class PositionMovementSerializer(serializers.ModelSerializer):
+    created_by_display = serializers.SerializerMethodField()
+    movement_type_display = serializers.CharField(
+        source="get_movement_type_display", read_only=True
+    )
+    old_status_display = serializers.CharField(
+        source="get_old_status_display", read_only=True
+    )
+    new_status_display = serializers.CharField(
+        source="get_new_status_display", read_only=True
+    )
+    position_code = serializers.CharField(source="position.code", read_only=True)
+
+    class Meta:
+        model = storage_models.PositionMovement
+        fields = [
+            "id",
+            "movement_type",
+            "movement_type_display",
+            "old_status",
+            "old_status_display",
+            "new_status",
+            "new_status_display",
+            "bin_code",
+            "notes",
+            "changes",
+            "position_code",
+            "created_at",
+            "created_by_display",
+        ]
+
+    def get_created_by_display(self, obj) -> str:
+        user = obj.created_by
+        if user is None:
+            return "Sistema"
+        full = (getattr(user, "get_full_name", lambda: "")() or "").strip()
+        return full or getattr(user, "username", None) or "Usuario"

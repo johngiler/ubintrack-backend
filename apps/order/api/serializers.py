@@ -425,6 +425,37 @@ class UserSimpleSerializer(serializers.ModelSerializer):
         fields = ['id', 'username', 'full_name']
 
 
+class EntryMovementSerializer(serializers.ModelSerializer):
+    created_by = UserSimpleSerializer(read_only=True)
+    movement_type_display = serializers.CharField(
+        source="get_movement_type_display", read_only=True
+    )
+    old_status_display = serializers.CharField(
+        source="get_old_status_display", read_only=True
+    )
+    new_status_display = serializers.CharField(
+        source="get_new_status_display", read_only=True
+    )
+    entry_code = serializers.CharField(source="entry.code", read_only=True)
+
+    class Meta:
+        model = order_models.EntryMovement
+        fields = [
+            "id",
+            "movement_type",
+            "movement_type_display",
+            "old_status",
+            "old_status_display",
+            "new_status",
+            "new_status_display",
+            "notes",
+            "changes",
+            "entry_code",
+            "created_at",
+            "created_by",
+        ]
+
+
 class ExitMovementSerializer(serializers.ModelSerializer):
     """Serializer para el historial de movimientos de órdenes de salida."""
     created_by = UserSimpleSerializer(read_only=True)

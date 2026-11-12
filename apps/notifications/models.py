@@ -7,11 +7,13 @@ class Notification(models.Model):
         CREATED = "created", "Creado"
         UPDATED = "updated", "Actualizado"
         DELETED = "deleted", "Eliminado"
+        STATUS = "status", "Estado"
 
     class Artifact(models.TextChoices):
         ENTRY = "entry", "Entrada"
         EXIT = "exit", "Salida"
         BIN = "bin", "Bin"
+        POSITION = "position", "Posición"
 
     class Target(models.TextChoices):
         ENTRY_DETAIL = "entry_detail", "Detalle entrada"
@@ -19,6 +21,9 @@ class Notification(models.Model):
         EXIT_DETAIL = "exit_detail", "Detalle salida"
         EXITS_LIST = "exits_list", "Lista salidas"
         BINS_LIST = "bins_list", "Lista bins"
+        POSITION_DETAIL = "position_detail", "Detalle posición"
+        POSITIONS_LIST = "positions_list", "Lista posiciones"
+        CAVAS_LIST = "cavas_list", "Lista cavas"
 
     workspace = models.ForeignKey(
         "workspaces.Workspace",

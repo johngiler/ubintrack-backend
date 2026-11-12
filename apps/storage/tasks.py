@@ -11,7 +11,9 @@ logger = logging.getLogger(__name__)
 @shared_task
 def generate_cava_positions(job_id: int) -> None:
     job = (
-        CavaGenerationJob.objects.select_related("cava", "cava__storage")
+        CavaGenerationJob.objects.select_related(
+            "cava", "cava__storage", "cava__storage__workspace", "created_by"
+        )
         .filter(pk=job_id)
         .first()
     )
@@ -41,3 +43,36 @@ def generate_cava_positions(job_id: int) -> None:
             "updated_at",
         ]
     )
+    try:
+        from apps.audit.models import ActivityBatch, ActivitySection
+        from apps.audit.services.view_log import log_bulk
+        from apps.notifications.services import notify_positions_generated
+
+        notify_positions_generated(
+            cava=job.cava,
+            created_count=result["created"],
+            actor=job.created_by,
+        )
+        items = result.get("created_items") or []
+        if items:
+            cava_name = job.cava.name or job.cava.code or str(job.cava_id)
+            actor = job.created_by
+            actor_name = (
+                (getattr(actor, "get_full_name", lambda: "")() or "").strip()
+                if actor
+                else "Sistema"
+            ) or (getattr(actor, "username", None) if actor else "Sistema") or "Sistema"
+            noun = "posición" if len(items) == 1 else "posiciones"
+            log_bulk(
+                workspace=job.workspace,
+                section=ActivitySection.POSITION,
+                action="generate",
+                kind=ActivityBatch.Kind.GENERATE,
+                summary=f"{actor_name} generó {len(items)} {noun} en {cava_name}",
+                items=items,
+                actor=actor,
+            )
+    except Exception:
+        logger.exception(
+            "No se pudo notificar generación de cava %s", job.cava_id
+        )

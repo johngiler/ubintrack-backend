@@ -13,6 +13,7 @@ from apps.order.api import views as order_views
 from apps.storage.api import views as storage_views
 from apps.task.api import views as task_views
 from apps.common.api.views import BulkOperationJobDetailView
+from apps.audit.views import ActivityBatchDetailView, ActivityBatchItemsView, ActivityViewSet
 from apps.notifications.views import NotificationViewSet
 from apps.notifications.views_frontend_build import FrontendBuildPublishView
 from apps.workspaces.api.views import WorkspaceCurrentView, WorkspaceMeView
@@ -47,6 +48,7 @@ router.register(r"tasks", task_views.TaskViewSet)
 router.register(r"task-logs", task_views.TaskLogViewSet)
 router.register(r"task-trackings", task_views.UserTaskTrackingViewSet)
 router.register(r"notifications", NotificationViewSet, basename="notifications")
+router.register(r"activity", ActivityViewSet, basename="activity")
 
 urlpatterns = [
     path("admin/", admin.site.urls),
@@ -73,6 +75,16 @@ urlpatterns = [
         "api/notifications/frontend-build/",
         FrontendBuildPublishView.as_view(),
         name="frontend-build-publish",
+    ),
+    path(
+        "api/activity/batches/<int:pk>/",
+        ActivityBatchDetailView.as_view(),
+        name="activity-batch-detail",
+    ),
+    path(
+        "api/activity/batches/<int:pk>/items/",
+        ActivityBatchItemsView.as_view(),
+        name="activity-batch-items",
     ),
     path("api/", include(router.urls)),
 ]

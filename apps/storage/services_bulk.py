@@ -17,10 +17,14 @@ def run_position_regenerate_tags(job: BulkOperationJob) -> dict[str, Any]:
     )
     regenerated = 0
     failed = 0
+    items: list[dict] = []
     for position in qs.iterator():
         try:
             position.refresh_label(persist=True)
             regenerated += 1
+            items.append(
+                {"resource_id": position.pk, "resource_code": position.code or ""}
+            )
         except Exception:
             failed += 1
     missing = len(ids) - qs.count()
@@ -32,6 +36,7 @@ def run_position_regenerate_tags(job: BulkOperationJob) -> dict[str, Any]:
     return {
         "regenerated": regenerated,
         "failed": failed,
+        "items": items,
         "message": " ".join(parts),
     }
 
@@ -47,7 +52,8 @@ def run_position_print(job: BulkOperationJob) -> dict[str, Any]:
         .order_by("cava__name", "hall", "rack", "level", "place")
     )
     skipped = [p.code for p in positions if not p.zpl_code]
-    zpl_jobs = [p.zpl_code for p in positions if p.zpl_code]
+    printable = [p for p in positions if p.zpl_code]
+    zpl_jobs = [p.zpl_code for p in printable]
     if not zpl_jobs:
         raise RuntimeError("Ninguna posición tiene etiqueta para imprimir.")
     if not print_to_zebra("\n".join(zpl_jobs)):
@@ -60,6 +66,9 @@ def run_position_print(job: BulkOperationJob) -> dict[str, Any]:
     return {
         "printed": len(zpl_jobs),
         "skipped": skipped,
+        "items": [
+            {"resource_id": p.pk, "resource_code": p.code or ""} for p in printable
+        ],
         "message": " ".join(parts),
     }
 
@@ -73,7 +82,12 @@ def run_position_delete(job: BulkOperationJob) -> dict[str, Any]:
     found_ids = set(qs.values_list("id", flat=True))
     missing = len(ids) - len(found_ids)
     blocked_count = qs.exclude(status="libre").count()
-    deleted_count, _ = qs.filter(status="libre").delete()
+    free_qs = qs.filter(status="libre")
+    items = [
+        {"resource_id": pk, "resource_code": code or ""}
+        for pk, code in free_qs.values_list("id", "code")
+    ]
+    deleted_count, _ = free_qs.delete()
     parts = [f"Se eliminaron {deleted_count} posiciones."]
     if blocked_count:
         parts.append(f"{blocked_count} no estaban libres.")
@@ -82,5 +96,6 @@ def run_position_delete(job: BulkOperationJob) -> dict[str, Any]:
     return {
         "deleted": deleted_count,
         "blocked": blocked_count,
+        "items": items,
         "message": " ".join(parts),
     }

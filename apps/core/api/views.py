@@ -42,6 +42,27 @@ class CustomObtainAuthToken(ObtainAuthToken):
         token, _created = Token.objects.get_or_create(user=user)
         user_serializer = serializers.CustomUserSerializer(user)
 
+        try:
+            from apps.audit.models import ActivitySection
+            from apps.audit.services.view_log import log_unit
+
+            display = (
+                (getattr(user, "get_full_name", lambda: "")() or "").strip()
+                or getattr(user, "username", None)
+                or str(user.pk)
+            )
+            log_unit(
+                workspace=ws,
+                section=ActivitySection.USER,
+                action="login",
+                summary=f"{display} inició sesión",
+                actor=user,
+                resource_id=user.pk,
+                resource_code=getattr(user, "username", "") or str(user.pk),
+            )
+        except Exception:
+            pass
+
         return Response({"token": token.key, "user": user_serializer.data})
 
 
@@ -94,6 +115,38 @@ class CustomUserViewSet(WorkspaceScopeMixin, viewsets.ModelViewSet):
             return qs
         return qs.filter(pk=user.pk)
 
+    def perform_create(self, serializer):
+        from apps.audit.services.crud_hooks import SECTION, log_crud
+
+        obj = serializer.save()
+        code = getattr(obj, "username", None) or getattr(obj, "email", None) or str(obj.pk)
+        log_crud(
+            workspace=getattr(obj, "workspace", None),
+            section=SECTION.USER,
+            action="create",
+            verb="creó el usuario",
+            label=code,
+            actor=self.request.user,
+            resource_id=obj.pk,
+            resource_code=code,
+        )
+
+    def perform_update(self, serializer):
+        from apps.audit.services.crud_hooks import SECTION, log_crud
+
+        obj = serializer.save()
+        code = getattr(obj, "username", None) or getattr(obj, "email", None) or str(obj.pk)
+        log_crud(
+            workspace=getattr(obj, "workspace", None),
+            section=SECTION.USER,
+            action="update",
+            verb="actualizó el usuario",
+            label=code,
+            actor=self.request.user,
+            resource_id=obj.pk,
+            resource_code=code,
+        )
+
     def perform_destroy(self, instance):
         if instance.pk == self.request.user.pk:
             raise PermissionDenied("No puede eliminar su propio usuario.")
@@ -106,7 +159,22 @@ class CustomUserViewSet(WorkspaceScopeMixin, viewsets.ModelViewSet):
             ).count()
             if admin_count <= 1:
                 raise PermissionDenied("Debe existir al menos un administrador activo.")
+        from apps.audit.services.crud_hooks import SECTION, log_crud
+
+        ws = instance.workspace
+        code = getattr(instance, "username", None) or getattr(instance, "email", None) or str(instance.pk)
+        pk = instance.pk
         instance.delete()
+        log_crud(
+            workspace=ws,
+            section=SECTION.USER,
+            action="delete",
+            verb="eliminó el usuario",
+            label=code,
+            actor=self.request.user,
+            resource_id=pk,
+            resource_code=code,
+        )
 
 
 class ProfileViewSet(WorkspaceScopeMixin, viewsets.ModelViewSet):
@@ -123,10 +191,55 @@ class ProfileViewSet(WorkspaceScopeMixin, viewsets.ModelViewSet):
         return self.scope_to_workspace(super().get_queryset())
 
     def perform_create(self, serializer):
+        from apps.audit.services.crud_hooks import SECTION, log_crud
+
         ws = get_workspace_for_request(self.request)
         if ws is None:
             raise ValidationError({"detail": "Owner no resuelto."})
-        serializer.save(workspace=ws)
+        obj = serializer.save(workspace=ws)
+        log_crud(
+            workspace=ws,
+            section=SECTION.PROFILE,
+            action="create",
+            verb="creó el perfil",
+            label=obj.name,
+            actor=self.request.user,
+            resource_id=obj.pk,
+            resource_code=obj.name,
+        )
+
+    def perform_update(self, serializer):
+        from apps.audit.services.crud_hooks import SECTION, log_crud
+
+        obj = serializer.save()
+        log_crud(
+            workspace=obj.workspace,
+            section=SECTION.PROFILE,
+            action="update",
+            verb="actualizó el perfil",
+            label=obj.name,
+            actor=self.request.user,
+            resource_id=obj.pk,
+            resource_code=obj.name,
+        )
+
+    def perform_destroy(self, instance):
+        from apps.audit.services.crud_hooks import SECTION, log_crud
+
+        ws = instance.workspace
+        name = instance.name
+        pk = instance.pk
+        instance.delete()
+        log_crud(
+            workspace=ws,
+            section=SECTION.PROFILE,
+            action="delete",
+            verb="eliminó el perfil",
+            label=name,
+            actor=self.request.user,
+            resource_id=pk,
+            resource_code=name,
+        )
 
 
 class CustomPermissionViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
@@ -159,10 +272,55 @@ class ClientViewSet(ClientScopeMixin, viewsets.ModelViewSet):
         return qs
 
     def perform_create(self, serializer):
+        from apps.audit.services.crud_hooks import SECTION, log_crud
+
         ws = get_workspace_for_request(self.request)
         if ws is None:
             raise ValidationError({"detail": "Owner no resuelto."})
-        serializer.save(workspace=ws)
+        obj = serializer.save(workspace=ws)
+        log_crud(
+            workspace=ws,
+            section=SECTION.CLIENT,
+            action="create",
+            verb="creó el cliente",
+            label=obj.name,
+            actor=self.request.user,
+            resource_id=obj.pk,
+            resource_code=obj.name,
+        )
+
+    def perform_update(self, serializer):
+        from apps.audit.services.crud_hooks import SECTION, log_crud
+
+        obj = serializer.save()
+        log_crud(
+            workspace=obj.workspace,
+            section=SECTION.CLIENT,
+            action="update",
+            verb="actualizó el cliente",
+            label=obj.name,
+            actor=self.request.user,
+            resource_id=obj.pk,
+            resource_code=obj.name,
+        )
+
+    def perform_destroy(self, instance):
+        from apps.audit.services.crud_hooks import SECTION, log_crud
+
+        ws = instance.workspace
+        name = instance.name
+        pk = instance.pk
+        instance.delete()
+        log_crud(
+            workspace=ws,
+            section=SECTION.CLIENT,
+            action="delete",
+            verb="eliminó el cliente",
+            label=name,
+            actor=self.request.user,
+            resource_id=pk,
+            resource_code=name,
+        )
 
     @action(detail=False, methods=['get'])
     def export_excel(self, request):

@@ -1094,3 +1094,62 @@ class ExitMovement(BaseModel):
             movement_type=movement_type,
             **kwargs
         )
+
+
+class EntryMovementType(models.TextChoices):
+    CREATED = "created", "Creada"
+    STATUS_CHANGED = "status_changed", "Cambio de Estado"
+    UPDATED = "updated", "Actualizada"
+    DELETED = "deleted", "Eliminada"
+
+
+class EntryMovement(BaseModel):
+    """Timeline por entrada (detalle en el ítem; el macro de vista solo resume)."""
+
+    entry = models.ForeignKey(
+        Entry,
+        on_delete=models.CASCADE,
+        related_name="movements",
+        verbose_name="entrada",
+    )
+    movement_type = models.CharField(
+        max_length=20,
+        choices=EntryMovementType.choices,
+        verbose_name="tipo de movimiento",
+    )
+    old_status = models.CharField(
+        max_length=15,
+        choices=OrderStatus.choices,
+        null=True,
+        blank=True,
+        verbose_name="estado anterior",
+    )
+    new_status = models.CharField(
+        max_length=15,
+        choices=OrderStatus.choices,
+        null=True,
+        blank=True,
+        verbose_name="estado nuevo",
+    )
+    notes = models.TextField(blank=True, null=True, verbose_name="notas")
+    changes = models.JSONField(default=dict, blank=True, verbose_name="cambios")
+
+    class Meta:
+        verbose_name = "movimiento de entrada"
+        verbose_name_plural = "movimientos de entrada"
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["entry", "-created_at"]),
+            models.Index(fields=["movement_type"]),
+        ]
+
+    def __str__(self):
+        return f"{self.entry_id} - {self.get_movement_type_display()} - {self.created_at}"
+
+    @classmethod
+    def log_movement(cls, entry_obj, movement_type, **kwargs):
+        return cls.objects.create(
+            entry=entry_obj,
+            movement_type=movement_type,
+            **kwargs,
+        )

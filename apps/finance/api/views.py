@@ -34,10 +34,55 @@ class TariffViewSet(WorkspaceScopeMixin, viewsets.ModelViewSet):
         return self.scope_to_workspace(super().get_queryset())
 
     def perform_create(self, serializer):
+        from apps.audit.services.crud_hooks import SECTION, log_crud
+
         ws = get_workspace_for_request(self.request)
         if ws is None:
             raise ValidationError({'detail': 'Owner no resuelto.'})
-        serializer.save(workspace=ws)
+        obj = serializer.save(workspace=ws)
+        log_crud(
+            workspace=ws,
+            section=SECTION.TARIFF,
+            action="create",
+            verb="creó la tarifa",
+            label=obj.name,
+            actor=self.request.user,
+            resource_id=obj.pk,
+            resource_code=obj.name,
+        )
+
+    def perform_update(self, serializer):
+        from apps.audit.services.crud_hooks import SECTION, log_crud
+
+        obj = serializer.save()
+        log_crud(
+            workspace=obj.workspace,
+            section=SECTION.TARIFF,
+            action="update",
+            verb="actualizó la tarifa",
+            label=obj.name,
+            actor=self.request.user,
+            resource_id=obj.pk,
+            resource_code=obj.name,
+        )
+
+    def perform_destroy(self, instance):
+        from apps.audit.services.crud_hooks import SECTION, log_crud
+
+        ws = instance.workspace
+        name = instance.name
+        pk = instance.pk
+        instance.delete()
+        log_crud(
+            workspace=ws,
+            section=SECTION.TARIFF,
+            action="delete",
+            verb="eliminó la tarifa",
+            label=name,
+            actor=self.request.user,
+            resource_id=pk,
+            resource_code=name,
+        )
 
 
 class BillingCalculationViewSet(viewsets.ViewSet):
