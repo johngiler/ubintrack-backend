@@ -60,25 +60,34 @@ def build_dashboard_stats(workspace) -> dict:
         stored=Count('id', filter=Q(status=choices.BinStatus.ALMACENADO)),
         dispatched=Count('id', filter=Q(status=choices.BinStatus.DESPACHADO)),
     )
-    positions = _positions_qs(workspace).aggregate(
+    # Todas las posiciones (como el mapa): inactiva aparte del estado operativo.
+    positions_base = Position.objects.filter(
+        cava__storage__workspace=workspace,
+        cava__is_virtual=False,
+    )
+    active = Q(is_active=True)
+    positions = positions_base.aggregate(
         total=Count('id'),
-        libre=Count('id', filter=Q(status=choices.PositionStatus.LIBRE)),
-        ocupada=Count('id', filter=Q(status=choices.PositionStatus.OCUPADO)),
-        asignada=Count('id', filter=Q(status=choices.PositionStatus.ASIGNADO)),
+        libre=Count('id', filter=active & Q(status=choices.PositionStatus.LIBRE)),
+        ocupada=Count('id', filter=active & Q(status=choices.PositionStatus.OCUPADO)),
+        asignada=Count('id', filter=active & Q(status=choices.PositionStatus.ASIGNADO)),
+        inactiva=Count('id', filter=Q(is_active=False)),
     )
 
     positions_total = positions['total'] or 0
     positions_free = positions['libre'] or 0
     positions_occupied = positions['ocupada'] or 0
     positions_assigned = positions['asignada'] or 0
+    positions_inactive = positions['inactiva'] or 0
 
-    total_percentage = occupied_percentage = assigned_percentage = free_percentage = 0.0
+    total_percentage = occupied_percentage = assigned_percentage = free_percentage = inactive_percentage = 0.0
     if positions_total > 0:
         total_percentage = (
             (positions_occupied + positions_assigned) / positions_total) * 100
         occupied_percentage = (positions_occupied / positions_total) * 100
         assigned_percentage = (positions_assigned / positions_total) * 100
         free_percentage = (positions_free / positions_total) * 100
+        inactive_percentage = (positions_inactive / positions_total) * 100
 
     return {
         'entries': {
@@ -104,10 +113,12 @@ def build_dashboard_stats(workspace) -> dict:
             'occupied_count': positions_occupied,
             'free_count': positions_free,
             'assigned_count': positions_assigned,
+            'inactive_count': positions_inactive,
             'total_percentage': round(total_percentage, 2),
             'occupied_percentage': round(occupied_percentage, 2),
             'assigned_percentage': round(assigned_percentage, 2),
             'free_percentage': round(free_percentage, 2),
+            'inactive_percentage': round(inactive_percentage, 2),
         },
     }
 
