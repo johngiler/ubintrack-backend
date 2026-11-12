@@ -13,7 +13,12 @@ from apps.inventory import models as inventory_models
 from apps.inventory.services import export_bin_entries_excel, export_products_excel
 from apps.common.utils.permissions_mixins import ClientScopeMixin, StrictDjangoModelPermissions
 from apps.core import choices
-from apps.common.utils.zebra import print_to_zebra
+from apps.common.utils.zebra import (
+    USER_PRINT_FAILED,
+    USER_PRINTER_NOT_CONFIGURED,
+    printer_is_configured,
+    print_to_zebra,
+)
 
 from . import serializers
 
@@ -384,6 +389,14 @@ class BinViewSet(ClientScopeMixin, viewsets.ModelViewSet):
         """Imprime etiquetas ZPL de bins (async si hay más de uno)."""
         from apps.common.models import BulkOperationJob
         from apps.inventory.services_bulk import run_bin_print
+        from apps.workspaces.utils.tenant import get_workspace_for_request
+
+        ws = get_workspace_for_request(request)
+        if not printer_is_configured(ws):
+            return Response(
+                {"detail": USER_PRINTER_NOT_CONFIGURED},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         return self._start_bin_bulk(
             request,
@@ -815,12 +828,14 @@ class BinViewSet(ClientScopeMixin, viewsets.ModelViewSet):
         workspace = getattr(bin_instance, "workspace", None) or get_workspace_for_request(
             request
         )
+        if not printer_is_configured(workspace):
+            return Response(
+                {"success": False, "message": USER_PRINTER_NOT_CONFIGURED},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         if not print_to_zebra(bin_instance.zpl_code, workspace=workspace):
             return Response(
-                {
-                    "success": False,
-                    "message": "No se pudo imprimir la etiqueta. Verifique la impresora.",
-                },
+                {"success": False, "message": USER_PRINT_FAILED},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 

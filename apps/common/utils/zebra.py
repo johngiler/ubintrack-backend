@@ -1,64 +1,62 @@
-import os
-import socket
 import logging
-from pathlib import Path
-
-from dotenv import load_dotenv
-
-load_dotenv(Path(__file__).resolve().parents[3] / ".env")
+import socket
 
 logger = logging.getLogger(__name__)
-# Fallback SO / .env cuando el owner no tiene IP configurada.
-_DEFAULT_PRINTER_IP = os.getenv("ZEBRA_PRINTER_IP", "127.0.0.1")
-_DEFAULT_PRINTER_PORT = int(os.getenv("ZEBRA_PRINTER_PORT", "9100"))
+
+USER_PRINTER_NOT_CONFIGURED = "Configure la impresora."
+USER_PRINT_FAILED = "No se pudo imprimir la etiqueta. Verifique la impresora."
 
 
-def resolve_printer_endpoint(workspace=None) -> tuple[str, int]:
-    """Host/puerto del workspace; si IP vacía, fallback de entorno."""
-    host = ""
-    port = _DEFAULT_PRINTER_PORT
-    if workspace is not None:
-        host = (getattr(workspace, "printer_ip", None) or "").strip()
-        try:
-            raw_port = getattr(workspace, "printer_port", None)
-            if raw_port:
-                port = int(raw_port)
-        except (TypeError, ValueError):
-            port = _DEFAULT_PRINTER_PORT
-    if not host:
-        host = _DEFAULT_PRINTER_IP
-    if port < 1 or port > 65535:
-        port = _DEFAULT_PRINTER_PORT
-    return host, port
-
-
-def printer_language_supported(workspace=None) -> bool:
+def printer_is_configured(workspace) -> bool:
+    """
+    Impresión solo con config completa del owner: IP, puerto válido y lenguaje ZPL.
+    Sin fallback de entorno (evita cruzar impresoras entre owners).
+    """
     if workspace is None:
-        return True
-    language = (getattr(workspace, "printer_language", None) or "zpl").strip().lower()
-    return language == "zpl"
+        return False
+    host = (getattr(workspace, "printer_ip", None) or "").strip()
+    if not host:
+        return False
+    try:
+        port = int(getattr(workspace, "printer_port", None) or 0)
+    except (TypeError, ValueError):
+        return False
+    if port < 1 or port > 65535:
+        return False
+    language = (getattr(workspace, "printer_language", None) or "").strip().lower()
+    if language != "zpl":
+        return False
+    return True
+
+
+def resolve_printer_endpoint(workspace) -> tuple[str, int] | None:
+    """Host/puerto del workspace, o None si la config no está completa."""
+    if not printer_is_configured(workspace):
+        return None
+    host = (workspace.printer_ip or "").strip()
+    port = int(workspace.printer_port)
+    return host, port
 
 
 def print_to_zebra(zpl_data, *, workspace=None):
     """
-    Envía datos ZPL a la impresora de red del owner.
+    Envía ZPL a la impresora de red del owner.
 
-    Args:
-        zpl_data (str): Código ZPL a imprimir
-        workspace: Workspace del owner (IP/puerto/lenguaje). Opcional → .env
-
-    Returns:
-        bool: True si la impresión fue exitosa, False si hubo error
+    Requiere workspace con impresora configurada (IP + puerto + ZPL).
+    No usa variables de entorno globales.
     """
     if not zpl_data:
         return False
 
-    if not printer_language_supported(workspace):
-        language = getattr(workspace, "printer_language", None)
-        logger.error("Lenguaje de impresora no soportado: %s", language)
+    endpoint = resolve_printer_endpoint(workspace)
+    if endpoint is None:
+        logger.error(
+            "Impresión bloqueada: impresora del owner no configurada (workspace_id=%s)",
+            getattr(workspace, "pk", None),
+        )
         return False
 
-    printer_ip, printer_port = resolve_printer_endpoint(workspace)
+    printer_ip, printer_port = endpoint
 
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)

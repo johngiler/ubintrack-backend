@@ -23,7 +23,12 @@ from apps.workspaces.models import Workspace
 
 logger = logging.getLogger(__name__)
 from apps.inventory import models as inventory_models
-from apps.common.utils.zebra import print_to_zebra
+from apps.common.utils.zebra import (
+    USER_PRINT_FAILED,
+    USER_PRINTER_NOT_CONFIGURED,
+    printer_is_configured,
+    print_to_zebra,
+)
 
 from . import serializers
 
@@ -906,6 +911,13 @@ class PositionViewSet(WorkspaceScopeMixin, viewsets.ModelViewSet):
         from apps.common.models import BulkOperationJob
         from apps.storage.services_bulk import run_position_print
 
+        ws = get_workspace_for_request(request)
+        if not printer_is_configured(ws):
+            return Response(
+                {"detail": USER_PRINTER_NOT_CONFIGURED},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         raw = request.data.get("per_label", 1)
         try:
             per_label = int(raw)
@@ -945,12 +957,14 @@ class PositionViewSet(WorkspaceScopeMixin, viewsets.ModelViewSet):
         workspace = getattr(position, "workspace", None) or get_workspace_for_request(
             request
         )
+        if not printer_is_configured(workspace):
+            return Response(
+                {"success": False, "message": USER_PRINTER_NOT_CONFIGURED},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         if not print_to_zebra(position.zpl_code, workspace=workspace):
             return Response(
-                {
-                    "success": False,
-                    "message": "No se pudo imprimir la etiqueta. Verifique la impresora.",
-                },
+                {"success": False, "message": USER_PRINT_FAILED},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 

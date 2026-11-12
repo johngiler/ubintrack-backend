@@ -5,7 +5,12 @@ from __future__ import annotations
 from typing import Any
 
 from apps.common.models import BulkOperationJob
-from apps.common.utils.zebra import print_to_zebra
+from apps.common.utils.zebra import (
+    USER_PRINT_FAILED,
+    USER_PRINTER_NOT_CONFIGURED,
+    printer_is_configured,
+    print_to_zebra,
+)
 from apps.storage import models as storage_models
 
 
@@ -85,10 +90,10 @@ def run_position_print(job: BulkOperationJob) -> dict[str, Any]:
 
     if not sheets:
         raise RuntimeError("Ninguna posición tiene etiqueta para imprimir.")
+    if not printer_is_configured(job.workspace):
+        raise RuntimeError(USER_PRINTER_NOT_CONFIGURED)
     if not print_to_zebra("\n".join(sheets), workspace=job.workspace):
-        raise RuntimeError(
-            "No se pudo imprimir la etiqueta. Verifique la impresora."
-        )
+        raise RuntimeError(USER_PRINT_FAILED)
     mode_label = "copias iguales" if same_copies else "distintas"
     parts = [
         f"Se enviaron {len(sheets)} etiquetas "

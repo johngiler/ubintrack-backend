@@ -7,7 +7,12 @@ from typing import Any
 from django.utils import timezone
 
 from apps.common.models import BulkOperationJob
-from apps.common.utils.zebra import print_to_zebra
+from apps.common.utils.zebra import (
+    USER_PRINT_FAILED,
+    USER_PRINTER_NOT_CONFIGURED,
+    printer_is_configured,
+    print_to_zebra,
+)
 from apps.core import choices
 from apps.inventory import models as inventory_models
 from apps.order.models import ExitProduct
@@ -60,10 +65,10 @@ def run_bin_print(job: BulkOperationJob) -> dict[str, Any]:
     zpl_jobs = [b.zpl_code for b in printable]
     if not zpl_jobs:
         raise RuntimeError("Ningún bin tiene etiqueta para imprimir.")
+    if not printer_is_configured(job.workspace):
+        raise RuntimeError(USER_PRINTER_NOT_CONFIGURED)
     if not print_to_zebra("\n".join(zpl_jobs), workspace=job.workspace):
-        raise RuntimeError(
-            "No se pudo imprimir la etiqueta. Verifique la impresora."
-        )
+        raise RuntimeError(USER_PRINT_FAILED)
     parts = [f"Se enviaron {len(zpl_jobs)} etiquetas."]
     if skipped:
         parts.append(f"{len(skipped)} sin ZPL.")

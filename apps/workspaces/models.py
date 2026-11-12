@@ -103,7 +103,7 @@ class Workspace(BaseModel):
         max_length=255,
         blank=True,
         default="",
-        help_text="Impresora de red del owner. Si vacío, se usa el fallback del entorno.",
+        help_text="Impresora de red de este owner. Obligatoria para imprimir.",
     )
     printer_port = models.PositiveIntegerField(
         "Puerto de impresora",
