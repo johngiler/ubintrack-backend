@@ -71,13 +71,17 @@ def create_bulk_job(
     workspace,
     kind: str,
     item_ids: list[int],
+    params: dict[str, Any] | None = None,
 ) -> BulkOperationJob:
+    initial: dict[str, Any] = {}
+    if params:
+        initial["params"] = params
     return BulkOperationJob.objects.create(
         workspace=workspace,
         kind=kind,
         item_ids=[int(x) for x in item_ids],
         status=BulkOperationJob.Status.PENDING,
-        result={},
+        result=initial,
     )
 
 
@@ -122,13 +126,16 @@ def start_bulk_operation(
     item_ids: list[int],
     runner: Callable[[BulkOperationJob], dict[str, Any]],
     celery_task,
+    params: dict[str, Any] | None = None,
 ) -> tuple[BulkOperationJob, bool]:
     """
     Devuelve (job, ran_async).
     ran_async=False → ya terminó en este request.
     """
     ids = [int(x) for x in item_ids]
-    job = create_bulk_job(workspace=workspace, kind=kind, item_ids=ids)
+    job = create_bulk_job(
+        workspace=workspace, kind=kind, item_ids=ids, params=params
+    )
     if len(ids) < ASYNC_MIN_ITEMS:
         execute_bulk_job(job.id, runner)
         job.refresh_from_db()

@@ -606,7 +606,7 @@ class PositionViewSet(WorkspaceScopeMixin, viewsets.ModelViewSet):
             )
         return Response(payload)
 
-    def _start_position_bulk(self, request, *, kind, runner):
+    def _start_position_bulk(self, request, *, kind, runner, params=None):
         from apps.common.models import BulkOperationJob
         from apps.common.tasks import run_bulk_operation_job
         from apps.common.utils.bulk_jobs import serialize_bulk_job, start_bulk_operation
@@ -625,11 +625,13 @@ class PositionViewSet(WorkspaceScopeMixin, viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        scoped_ids = list(
+        # Conservar orden de ids del payload (empaquetado por etiqueta).
+        scoped = set(
             self.scope_to_workspace(
                 storage_models.Position.objects.filter(id__in=ids)
             ).values_list("id", flat=True)
         )
+        scoped_ids = [i for i in ids if i in scoped]
         if not scoped_ids:
             return Response(
                 {"detail": "No se encontraron posiciones."},
@@ -642,6 +644,7 @@ class PositionViewSet(WorkspaceScopeMixin, viewsets.ModelViewSet):
             item_ids=scoped_ids,
             runner=runner,
             celery_task=run_bulk_operation_job,
+            params=params,
         )
         payload = serialize_bulk_job(job, async_=ran_async)
         if ran_async:
@@ -875,14 +878,32 @@ class PositionViewSet(WorkspaceScopeMixin, viewsets.ModelViewSet):
 
     @action(detail=False, methods=["post"], url_path="bulk-print")
     def bulk_print(self, request):
-        """Imprime etiquetas ZPL de posiciones (async si hay más de una)."""
+        """Imprime etiquetas ZPL de posiciones (async si hay más de una).
+
+        `per_label` (1–4): cuántas posiciones distintas van en cada etiqueta 4×2.
+        La última etiqueta puede quedar incompleta.
+        """
         from apps.common.models import BulkOperationJob
         from apps.storage.services_bulk import run_position_print
+
+        raw = request.data.get("per_label", 1)
+        try:
+            per_label = int(raw)
+        except (TypeError, ValueError):
+            per_label = 1
+        per_label = max(1, min(per_label, 4))
+        same_copies = self._optional_bool(request.data, "same_position_copies")
+        if same_copies is None:
+            same_copies = False
 
         return self._start_position_bulk(
             request,
             kind=BulkOperationJob.Kind.POSITION_PRINT,
             runner=run_position_print,
+            params={
+                "per_label": per_label,
+                "same_position_copies": bool(same_copies),
+            },
         )
 
     @action(detail=True, methods=['post'])

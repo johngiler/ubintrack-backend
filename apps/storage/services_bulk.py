@@ -42,29 +42,64 @@ def run_position_regenerate_tags(job: BulkOperationJob) -> dict[str, Any]:
 
 
 def run_position_print(job: BulkOperationJob) -> dict[str, Any]:
+    from apps.storage.services import generate_position_multi_tag_zpl
+
     ids = job.item_ids or []
-    positions = list(
-        storage_models.Position.objects.filter(
+    params = (job.result or {}).get("params") or {}
+    try:
+        per_label = int(params.get("per_label") or 1)
+    except (TypeError, ValueError):
+        per_label = 1
+    per_label = max(1, min(per_label, 4))
+    same_copies = bool(params.get("same_position_copies"))
+
+    # Conservar el orden de selección del job.
+    by_id = {
+        p.id: p
+        for p in storage_models.Position.objects.filter(
             id__in=ids,
             cava__storage__workspace=job.workspace,
-        )
-        .only("id", "code", "zpl_code")
-        .order_by("cava__name", "hall", "rack", "level", "place")
-    )
-    skipped = [p.code for p in positions if not p.zpl_code]
-    printable = [p for p in positions if p.zpl_code]
-    zpl_jobs = [p.zpl_code for p in printable]
-    if not zpl_jobs:
+        ).only("id", "code", "level", "zpl_code")
+    }
+    ordered = [by_id[i] for i in ids if i in by_id]
+    skipped = [p.code for p in ordered if not p.zpl_code]
+    printable = [p for p in ordered if p.zpl_code]
+    if not printable:
         raise RuntimeError("Ninguna posición tiene etiqueta para imprimir.")
-    if not print_to_zebra("\n".join(zpl_jobs)):
+
+    sheets: list[str] = []
+    if same_copies:
+        # N copias de la misma posición por etiqueta física.
+        for position in printable:
+            group = [position] * per_label
+            zpl = generate_position_multi_tag_zpl(group)
+            if zpl:
+                sheets.append(zpl)
+    else:
+        # Posiciones distintas empaquetadas; última etiqueta puede quedar corta.
+        for start in range(0, len(printable), per_label):
+            group = printable[start : start + per_label]
+            zpl = generate_position_multi_tag_zpl(group)
+            if zpl:
+                sheets.append(zpl)
+
+    if not sheets:
+        raise RuntimeError("Ninguna posición tiene etiqueta para imprimir.")
+    if not print_to_zebra("\n".join(sheets)):
         raise RuntimeError(
             "No se pudo imprimir la etiqueta. Verifique la impresora."
         )
-    parts = [f"Se enviaron {len(zpl_jobs)} etiquetas."]
+    mode_label = "copias iguales" if same_copies else "distintas"
+    parts = [
+        f"Se enviaron {len(sheets)} etiquetas "
+        f"({len(printable)} posiciones, {per_label} {mode_label} por etiqueta)."
+    ]
     if skipped:
         parts.append(f"{len(skipped)} sin ZPL.")
     return {
-        "printed": len(zpl_jobs),
+        "printed": len(sheets),
+        "positions": len(printable),
+        "per_label": per_label,
         "skipped": skipped,
         "items": [
             {"resource_id": p.pk, "resource_code": p.code or ""} for p in printable

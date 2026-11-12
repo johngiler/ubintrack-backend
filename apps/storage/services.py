@@ -181,10 +181,14 @@ def build_position_code(
     return separator.join(part for part in parts if part)
 
 
+def _zpl_safe(value) -> str:
+    return str(value or "").replace("^", " ").replace("~", " ")
+
+
 def generate_position_tag_zpl(position):
     """ZPL de posición para etiqueta 4×2" @ 203 DPI (texto izq. + QR der., casi a sangre)."""
-    code = str(position.code or "").replace("^", " ").replace("~", " ")
-    level = str(position.level or "").replace("^", " ").replace("~", " ")
+    code = _zpl_safe(getattr(position, "code", None))
+    level = _zpl_safe(getattr(position, "level", None))
 
     # 4" × 2" @ 203 DPI
     return f"""^XA
@@ -194,5 +198,60 @@ def generate_position_tag_zpl(position):
 ^FO16,50^A0N,70,70^FDNIVEL {level}^FS
 ^FO16,160^A0N,42,42^FD{code}^FS
 ^FO500,28^BQN,2,7^FDMA,{code}^FS
+^XZ
+"""
+
+
+def generate_position_multi_tag_zpl(positions) -> str:
+    """
+    Una etiqueta física 4×2" @ 203 DPI con varias posiciones distintas.
+    1 → layout actual; 2–3 en fila; 4 en rejilla 2×2.
+    La última hoja del lote puede traer menos ítems (remanente).
+    """
+    items = list(positions)[:4]
+    if not items:
+        return ""
+    if len(items) == 1:
+        return generate_position_tag_zpl(items[0])
+
+    n = len(items)
+    blocks: list[str] = []
+
+    if n <= 3:
+        # Columnas iguales a lo ancho (812).
+        cell_w = 812 // n
+        qr_mag = 5 if n == 2 else 4
+        for i, pos in enumerate(items):
+            code = _zpl_safe(getattr(pos, "code", None))
+            level = _zpl_safe(getattr(pos, "level", None))
+            x = i * cell_w
+            qr_x = x + max(8, (cell_w - (qr_mag * 25)) // 2)
+            blocks.append(
+                f"^FO{x + 8},18^A0N,28,28^FDNIVEL {level}^FS\n"
+                f"^FO{x + 8},56^A0N,22,22^FD{code}^FS\n"
+                f"^FO{qr_x},100^BQN,2,{qr_mag}^FDMA,{code}^FS"
+            )
+    else:
+        # 2×2.
+        cell_w, cell_h = 406, 203
+        qr_mag = 4
+        for i, pos in enumerate(items):
+            code = _zpl_safe(getattr(pos, "code", None))
+            level = _zpl_safe(getattr(pos, "level", None))
+            col, row = i % 2, i // 2
+            x, y = col * cell_w, row * cell_h
+            qr_x = x + max(8, (cell_w - (qr_mag * 25)) // 2)
+            blocks.append(
+                f"^FO{x + 8},{y + 10}^A0N,24,24^FDNIVEL {level}^FS\n"
+                f"^FO{x + 8},{y + 40}^A0N,20,20^FD{code}^FS\n"
+                f"^FO{qr_x},{y + 70}^BQN,2,{qr_mag}^FDMA,{code}^FS"
+            )
+
+    body = "\n".join(blocks)
+    return f"""^XA
+^PW812
+^LL406
+^LH0,0
+{body}
 ^XZ
 """
