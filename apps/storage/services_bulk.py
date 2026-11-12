@@ -85,7 +85,7 @@ def run_position_print(job: BulkOperationJob) -> dict[str, Any]:
 
     if not sheets:
         raise RuntimeError("Ninguna posición tiene etiqueta para imprimir.")
-    if not print_to_zebra("\n".join(sheets)):
+    if not print_to_zebra("\n".join(sheets), workspace=job.workspace):
         raise RuntimeError(
             "No se pudo imprimir la etiqueta. Verifique la impresora."
         )

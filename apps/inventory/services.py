@@ -20,25 +20,32 @@ logger = logging.getLogger(__name__)
 
 
 def generate_bin_tag(bin_instance):
-    """Etiqueta de bin 4×2" (preview @ 300 DPI): campos + QR repartidos en todo el alto."""
+    """Etiqueta de bin (preview): campos + QR; tamaño según medida del owner."""
+    from apps.workspaces.utils.label_geometry import label_geometry, scale_dot
 
-    # 4×2" @ 300 DPI (misma proporción que ZPL 4×2 @ 203)
-    tag_width = 1200
-    tag_height = 600
-    padding = 18
-    qr_size = 340
+    workspace = getattr(bin_instance, "workspace", None) or workspace_from_client(
+        getattr(bin_instance, "client", None)
+    )
+    geo = label_geometry(workspace)
+    # Preview baseline 4×2 @ 300 DPI (1200×600); escala con pulgadas del owner.
+    tag_width = max(200, scale_dot(1200, geo["sx"]))
+    tag_height = max(100, scale_dot(600, geo["sy"]))
+    padding = max(8, scale_dot(18, min(geo["sx"], geo["sy"])))
+    qr_size = max(80, scale_dot(340, min(geo["sx"], geo["sy"])))
+    title_size = max(12, scale_dot(32, min(geo["sx"], geo["sy"])))
+    text_size = max(10, scale_dot(24, min(geo["sx"], geo["sy"])))
 
     tag = Image.new("RGB", (tag_width, tag_height), (255, 255, 255))
     draw = ImageDraw.Draw(tag)
 
     try:
         font_path = os.path.join(settings.BASE_DIR, "arial.ttf")
-        title_font = ImageFont.truetype(font_path, 32)
-        text_font = ImageFont.truetype(font_path, 24)
+        title_font = ImageFont.truetype(font_path, title_size)
+        text_font = ImageFont.truetype(font_path, text_size)
     except OSError:
         try:
-            title_font = ImageFont.truetype("Arial", 32)
-            text_font = ImageFont.truetype("Arial", 24)
+            title_font = ImageFont.truetype("Arial", title_size)
+            text_font = ImageFont.truetype("Arial", text_size)
         except OSError:
             logger.error("No se pudo cargar ninguna fuente. Usando la fuente predeterminada.")
             title_font = ImageFont.load_default()
@@ -69,7 +76,6 @@ def generate_bin_tag(bin_instance):
     if hasattr(bin_instance, "position") and bin_instance.position:
         position = clip(bin_instance.position.code, 36)
     bin_code = clip(bin_instance.code, 36)
-    workspace = workspace_from_client(bin_instance.client)
     company_name = clip(workspace_display_name(workspace), 38).upper()
 
     product_name = "-"
@@ -133,7 +139,8 @@ def generate_bin_tag(bin_instance):
 
 
 def generate_bin_tag_zpl(bin_instance):
-    """ZPL de bin 4×2" @ 203 DPI: campos en todo el alto + QR centrado."""
+    """ZPL de bin: campos + QR; geometría según medida/DPI del owner."""
+    from apps.workspaces.utils.label_geometry import label_geometry, scale_dot
 
     def truncate_text_zpl(text, max_length=34):
         text = str(text or "")
@@ -161,10 +168,17 @@ def generate_bin_tag_zpl(bin_instance):
             f"^FO{value_x},{y}^A0N,{size},{size}^FD{value}^FS\n"
         )
 
+    workspace = getattr(bin_instance, "workspace", None) or workspace_from_client(
+        getattr(bin_instance, "client", None)
+    )
+    geo = label_geometry(workspace)
+    sx, sy = geo["sx"], geo["sy"]
+    pw, ll = geo["pw"], geo["ll"]
+    scale = min(sx, sy)
+
     client = bin_instance.client.name if bin_instance.client else "-"
     position = bin_instance.position.code if bin_instance.position else "-"
     bin_code = bin_instance.code or "-"
-    workspace = workspace_from_client(bin_instance.client)
     company_name = truncate_text_zpl(
         zpl_safe(workspace_display_name(workspace)).upper(),
         34,
@@ -197,7 +211,6 @@ def generate_bin_tag_zpl(bin_instance):
             elif bin_product.entry_product.expiration_date:
                 exp = bin_product.entry_product.expiration_date.strftime("%Y-%m-%d")
 
-    # 9 filas repartidas en 406 dots (márgenes ~14).
     rows = [
         ("title", company_name, None),
         ("field", "CLIENTE", client),
@@ -209,23 +222,28 @@ def generate_bin_tag_zpl(bin_instance):
         ("field", "CANTIDAD", cantidad),
         ("field", "EXPIRACION", exp),
     ]
-    top = 14
-    usable = 406 - top * 2
+    top = scale_dot(14, sy)
+    usable = max(1, ll - top * 2)
     step = usable / len(rows)
+    field_size = max(10, scale_dot(22, scale))
+    title_size = max(12, scale_dot(28, scale))
+    left = scale_dot(14, sx)
     lines = []
     for index, row in enumerate(rows):
-        y = int(top + index * step + max(0, (step - 24) / 2))
+        y = int(top + index * step + max(0, (step - field_size) / 2))
         if row[0] == "title":
             lines.append(
-                f"^FO14,{y}^A0N,28,28^FD{row[1]}^FS\n"
-                f"^FO15,{y}^A0N,28,28^FD{row[1]}^FS\n"
+                f"^FO{left},{y}^A0N,{title_size},{title_size}^FD{row[1]}^FS\n"
+                f"^FO{left + 1},{y}^A0N,{title_size},{title_size}^FD{row[1]}^FS\n"
             )
         else:
-            lines.append(zpl_bold_label(14, y, row[1], row[2], size=22))
+            lines.append(zpl_bold_label(left, y, row[1], row[2], size=field_size))
 
-    # QR mag 6 ≈ alto útil; centrado en vertical.
-    lines.append("^FO520,50^BQN,2,6^FDMA," + f"{bin_code}^FS\n")
-    return "^XA\n^PW812\n^LL406\n^LH0,0\n" + "".join(lines) + "^XZ\n"
+    qr_mag = max(2, scale_dot(6, scale))
+    lines.append(
+        f"^FO{scale_dot(520, sx)},{scale_dot(50, sy)}^BQN,2,{qr_mag}^FDMA,{bin_code}^FS\n"
+    )
+    return f"^XA\n^PW{pw}\n^LL{ll}\n^LH0,0\n" + "".join(lines) + "^XZ\n"
 
 
 def export_bin_entries_excel(bins_queryset):

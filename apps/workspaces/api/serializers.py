@@ -51,6 +51,16 @@ class WorkspacePublicSerializer(serializers.ModelSerializer):
         return self._absolute_media(obj, "favicon")
 
 
+PRINTER_SETTINGS_FIELDS = (
+    "printer_ip",
+    "printer_port",
+    "label_width_in",
+    "label_height_in",
+    "printer_dpi",
+    "printer_language",
+)
+
+
 class WorkspaceMeReadSerializer(WorkspacePublicSerializer):
     """Configuración completa del owner para administradores (GET /api/me/workspace/)."""
 
@@ -59,7 +69,7 @@ class WorkspaceMeReadSerializer(WorkspacePublicSerializer):
             "rif",
             "invoice_prefix",
             "is_active",
-        )
+        ) + PRINTER_SETTINGS_FIELDS
 
 
 class WorkspaceMeUpdateSerializer(serializers.ModelSerializer):
@@ -82,15 +92,26 @@ class WorkspaceMeUpdateSerializer(serializers.ModelSerializer):
             "logo",
             "logo_mark",
             "favicon",
-        )
+        ) + PRINTER_SETTINGS_FIELDS
         extra_kwargs = {
             "logo": {"required": False, "allow_null": True},
             "logo_mark": {"required": False, "allow_null": True},
             "favicon": {"required": False, "allow_null": True},
+            "printer_ip": {"required": False, "allow_blank": True},
+            "printer_port": {"required": False},
+            "label_width_in": {"required": False},
+            "label_height_in": {"required": False},
+            "printer_dpi": {"required": False},
+            "printer_language": {"required": False},
         }
 
     def validate(self, attrs):
         for field in ("logo", "logo_mark", "favicon"):
             if field in attrs and attrs[field] is None:
                 attrs.pop(field)
+        language = attrs.get("printer_language")
+        if language is not None and language != Workspace.PrinterLanguage.ZPL:
+            raise serializers.ValidationError(
+                {"printer_language": "Lenguaje no soportado."}
+            )
         return attrs

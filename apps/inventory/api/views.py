@@ -810,7 +810,12 @@ class BinViewSet(ClientScopeMixin, viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        if not print_to_zebra(bin_instance.zpl_code):
+        from apps.workspaces.utils.tenant import get_workspace_for_request
+
+        workspace = getattr(bin_instance, "workspace", None) or get_workspace_for_request(
+            request
+        )
+        if not print_to_zebra(bin_instance.zpl_code, workspace=workspace):
             return Response(
                 {
                     "success": False,

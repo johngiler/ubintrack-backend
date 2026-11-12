@@ -5,6 +5,9 @@ Tenant lógico del SaaS WMS: un owner (empresa operadora) con aislamiento de dat
 - Branding: logos, colores, textos del WMS por owner.
 """
 
+from decimal import Decimal
+
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 
 from apps.common.models import BaseModel
@@ -25,6 +28,9 @@ class Workspace(BaseModel):
         LIGHT = "light", "Solo modo claro"
         DARK = "dark", "Solo modo oscuro"
         BOTH = "both", "Ambos modos"
+
+    class PrinterLanguage(models.TextChoices):
+        ZPL = "zpl", "ZPL"
 
     slug = models.SlugField(
         max_length=64,
@@ -91,6 +97,43 @@ class Workspace(BaseModel):
         blank=True,
         default="",
         help_text="Prefijo para comprobantes (ej. RBCOLD).",
+    )
+    printer_ip = models.CharField(
+        "IP o host de impresora",
+        max_length=255,
+        blank=True,
+        default="",
+        help_text="Impresora de red del owner. Si vacío, se usa el fallback del entorno.",
+    )
+    printer_port = models.PositiveIntegerField(
+        "Puerto de impresora",
+        default=9100,
+        validators=[MinValueValidator(1), MaxValueValidator(65535)],
+    )
+    label_width_in = models.DecimalField(
+        "Ancho de etiqueta (pulgadas)",
+        max_digits=5,
+        decimal_places=2,
+        default=Decimal("4.00"),
+        validators=[MinValueValidator(Decimal("0.50")), MaxValueValidator(Decimal("12.00"))],
+    )
+    label_height_in = models.DecimalField(
+        "Alto de etiqueta (pulgadas)",
+        max_digits=5,
+        decimal_places=2,
+        default=Decimal("2.00"),
+        validators=[MinValueValidator(Decimal("0.50")), MaxValueValidator(Decimal("12.00"))],
+    )
+    printer_dpi = models.PositiveIntegerField(
+        "DPI de impresora",
+        default=203,
+        validators=[MinValueValidator(72), MaxValueValidator(600)],
+    )
+    printer_language = models.CharField(
+        "Lenguaje de impresora",
+        max_length=16,
+        choices=PrinterLanguage.choices,
+        default=PrinterLanguage.ZPL,
     )
 
     class Meta:

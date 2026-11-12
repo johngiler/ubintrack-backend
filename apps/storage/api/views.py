@@ -942,7 +942,10 @@ class PositionViewSet(WorkspaceScopeMixin, viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        if not print_to_zebra(position.zpl_code):
+        workspace = getattr(position, "workspace", None) or get_workspace_for_request(
+            request
+        )
+        if not print_to_zebra(position.zpl_code, workspace=workspace):
             return Response(
                 {
                     "success": False,
