@@ -374,6 +374,8 @@ def build_warehouse_structure(workspace) -> dict | None:
             'code': cava.code,
             'condition': cava.condition,
             'current_temp': cava.current_temp,
+            'temp_min': cava.temp_min,
+            'temp_max': cava.temp_max,
             'plan_layout': cava.plan_layout or {},
             'blocks': [
                 {
