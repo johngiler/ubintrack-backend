@@ -5,6 +5,8 @@ from __future__ import annotations
 import logging
 from typing import Any, Callable
 
+from django.db import transaction
+
 from apps.common.models import BulkOperationJob
 
 logger = logging.getLogger(__name__)
@@ -13,6 +15,10 @@ logger = logging.getLogger(__name__)
 ASYNC_MIN_ITEMS = 2
 
 USER_DETAIL_ASYNC = "En proceso. Puedes continuar mientras se procesa."
+
+
+class BulkJobInProgress(Exception):
+    """Ya hay un job del mismo tipo pending/running en el workspace."""
 
 
 def serialize_bulk_job(job: BulkOperationJob, *, async_: bool | None = None) -> dict[str, Any]:
@@ -64,6 +70,17 @@ def serialize_bulk_job(job: BulkOperationJob, *, async_: bool | None = None) -> 
         payload["success"] = True
         payload["message"] = USER_DETAIL_ASYNC
     return payload
+
+
+def has_open_bulk_job(*, workspace, kind: str) -> bool:
+    return BulkOperationJob.objects.filter(
+        workspace=workspace,
+        kind=kind,
+        status__in=(
+            BulkOperationJob.Status.PENDING,
+            BulkOperationJob.Status.RUNNING,
+        ),
+    ).exists()
 
 
 def create_bulk_job(
@@ -131,23 +148,36 @@ def start_bulk_operation(
     """
     Devuelve (job, ran_async).
     ran_async=False → ya terminó en este request.
+
+    Regla: no permite otro job del mismo `kind` en el workspace mientras
+    haya uno pending/running.
     """
+    from apps.workspaces.models import Workspace
+
     ids = [int(x) for x in item_ids]
-    job = create_bulk_job(
-        workspace=workspace, kind=kind, item_ids=ids, params=params
-    )
+    with transaction.atomic():
+        # Serializa arranques concurrentes del mismo owner.
+        Workspace.objects.select_for_update().filter(pk=workspace.pk).exists()
+        if has_open_bulk_job(workspace=workspace, kind=kind):
+            raise BulkJobInProgress()
+        job = create_bulk_job(
+            workspace=workspace, kind=kind, item_ids=ids, params=params
+        )
+        job_id = job.id
+
     if len(ids) < ASYNC_MIN_ITEMS:
-        execute_bulk_job(job.id, runner)
+        execute_bulk_job(job_id, runner)
         job.refresh_from_db()
         return job, False
 
     try:
-        celery_task.delay(job.id)
+        celery_task.delay(job_id)
     except Exception:
-        logger.exception("No se pudo encolar bulk job %s", job.id)
+        logger.exception("No se pudo encolar bulk job %s", job_id)
         # Fallback sync si no hay worker/broker.
-        execute_bulk_job(job.id, runner)
+        execute_bulk_job(job_id, runner)
         job.refresh_from_db()
         return job, False
 
+    job.refresh_from_db()
     return job, True

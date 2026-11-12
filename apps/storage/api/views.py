@@ -12,12 +12,14 @@ from rest_framework.views import APIView
 from apps.common.pagination import MediumPagination
 from django_filters.rest_framework import DjangoFilterBackend
 import django_filters
+from django.db import transaction
 from django.db.models import Case, Count, IntegerField, Prefetch, Q, Value, When
 from django.db.models.functions import Cast
 
 from apps.storage import models as storage_models
 from apps.storage.generation import iter_slots
 from apps.storage.tasks import generate_cava_positions
+from apps.workspaces.models import Workspace
 
 logger = logging.getLogger(__name__)
 from apps.inventory import models as inventory_models
@@ -187,11 +189,7 @@ class CavaViewSet(WorkspaceScopeMixin, viewsets.ModelViewSet):
 
         cava = self.get_object()
         active = storage_models.CavaGenerationJob.Status
-        if cava.generation_jobs.filter(status__in=(active.PENDING, active.RUNNING)).exists():
-            return Response(
-                {"detail": "En proceso. Puedes continuar mientras se crean."},
-                status=status.HTTP_409_CONFLICT,
-            )
+        workspace = cava.storage.workspace
         slot_count = sum(1 for _ in iter_slots(cava))
         if slot_count < 1:
             return Response(
@@ -199,12 +197,22 @@ class CavaViewSet(WorkspaceScopeMixin, viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        workspace = cava.storage.workspace
-        job = storage_models.CavaGenerationJob.objects.create(
-            cava=cava,
-            workspace=workspace,
-            expected_count=slot_count,
-        )
+        # Mismo tipo: no otra generación de cava en el owner mientras hay una activa.
+        with transaction.atomic():
+            Workspace.objects.select_for_update().filter(pk=workspace.pk).exists()
+            if storage_models.CavaGenerationJob.objects.filter(
+                workspace=workspace,
+                status__in=(active.PENDING, active.RUNNING),
+            ).exists():
+                return Response(
+                    {"detail": "En proceso. Puedes continuar mientras se crean."},
+                    status=status.HTTP_409_CONFLICT,
+                )
+            job = storage_models.CavaGenerationJob.objects.create(
+                cava=cava,
+                workspace=workspace,
+                expected_count=slot_count,
+            )
         if slot_count == 1:
             return self._generate_now(job)
 
@@ -616,7 +624,12 @@ class PositionViewSet(WorkspaceScopeMixin, viewsets.ModelViewSet):
     def _start_position_bulk(self, request, *, kind, runner, params=None):
         from apps.common.models import BulkOperationJob
         from apps.common.tasks import run_bulk_operation_job
-        from apps.common.utils.bulk_jobs import serialize_bulk_job, start_bulk_operation
+        from apps.common.utils.bulk_jobs import (
+            BulkJobInProgress,
+            USER_DETAIL_ASYNC,
+            serialize_bulk_job,
+            start_bulk_operation,
+        )
 
         if is_client_user(request.user):
             return Response({"detail": "No autorizado."}, status=status.HTTP_403_FORBIDDEN)
@@ -645,14 +658,20 @@ class PositionViewSet(WorkspaceScopeMixin, viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        job, ran_async = start_bulk_operation(
-            workspace=ws,
-            kind=kind,
-            item_ids=scoped_ids,
-            runner=runner,
-            celery_task=run_bulk_operation_job,
-            params=params,
-        )
+        try:
+            job, ran_async = start_bulk_operation(
+                workspace=ws,
+                kind=kind,
+                item_ids=scoped_ids,
+                runner=runner,
+                celery_task=run_bulk_operation_job,
+                params=params,
+            )
+        except BulkJobInProgress:
+            return Response(
+                {"detail": USER_DETAIL_ASYNC},
+                status=status.HTTP_409_CONFLICT,
+            )
         payload = serialize_bulk_job(job, async_=ran_async)
         if ran_async:
             return Response(payload, status=status.HTTP_202_ACCEPTED)

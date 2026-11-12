@@ -202,7 +202,12 @@ class BinViewSet(ClientScopeMixin, viewsets.ModelViewSet):
     def _start_bin_bulk(self, request, *, kind, runner):
         from apps.common.models import BulkOperationJob
         from apps.common.tasks import run_bulk_operation_job
-        from apps.common.utils.bulk_jobs import serialize_bulk_job, start_bulk_operation
+        from apps.common.utils.bulk_jobs import (
+            BulkJobInProgress,
+            USER_DETAIL_ASYNC,
+            serialize_bulk_job,
+            start_bulk_operation,
+        )
         from apps.workspaces.utils.tenant import get_workspace_for_request
 
         if is_client_user(request.user):
@@ -232,13 +237,19 @@ class BinViewSet(ClientScopeMixin, viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        job, ran_async = start_bulk_operation(
-            workspace=ws,
-            kind=kind,
-            item_ids=scoped_ids,
-            runner=runner,
-            celery_task=run_bulk_operation_job,
-        )
+        try:
+            job, ran_async = start_bulk_operation(
+                workspace=ws,
+                kind=kind,
+                item_ids=scoped_ids,
+                runner=runner,
+                celery_task=run_bulk_operation_job,
+            )
+        except BulkJobInProgress:
+            return Response(
+                {"detail": USER_DETAIL_ASYNC},
+                status=status.HTTP_409_CONFLICT,
+            )
         payload = serialize_bulk_job(job, async_=ran_async)
         if ran_async:
             return Response(payload, status=status.HTTP_202_ACCEPTED)
