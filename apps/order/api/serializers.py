@@ -413,16 +413,23 @@ class ExitSerializer(serializers.ModelSerializer):
 
     def get_updated_by_name(self, obj):
         if obj.updated_by:
-            return obj.updated_by.get_full_name() or obj.updated_by.username
+            from apps.core.utils.display_name import user_display_name
+
+            return user_display_name(obj.updated_by)
         return None
 
 
 class UserSimpleSerializer(serializers.ModelSerializer):
-    full_name = serializers.CharField(source='get_full_name', read_only=True)
+    full_name = serializers.SerializerMethodField()
 
     class Meta:
         model = core_models.CustomUser
         fields = ['id', 'username', 'full_name']
+
+    def get_full_name(self, obj) -> str:
+        from apps.core.utils.display_name import user_display_name
+
+        return user_display_name(obj)
 
 
 class EntryMovementSerializer(serializers.ModelSerializer):

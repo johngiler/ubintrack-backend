@@ -468,8 +468,6 @@ class PositionMovementSerializer(serializers.ModelSerializer):
         ]
 
     def get_created_by_display(self, obj) -> str:
-        user = obj.created_by
-        if user is None:
-            return "Sistema"
-        full = (getattr(user, "get_full_name", lambda: "")() or "").strip()
-        return full or getattr(user, "username", None) or "Usuario"
+        from apps.core.utils.display_name import user_display_name
+
+        return user_display_name(obj.created_by)

@@ -488,11 +488,16 @@ class ExitSimpleSerializer(serializers.ModelSerializer):
 
 
 class UserSimpleSerializer(serializers.ModelSerializer):
-    full_name = serializers.CharField(source='get_full_name', read_only=True)
+    full_name = serializers.SerializerMethodField()
 
     class Meta:
         model = core_models.CustomUser
         fields = ['id', 'username', 'full_name']
+
+    def get_full_name(self, obj) -> str:
+        from apps.core.utils.display_name import user_display_name
+
+        return user_display_name(obj)
 
 
 class BinMovementSerializer(serializers.ModelSerializer):

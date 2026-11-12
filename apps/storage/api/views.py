@@ -104,6 +104,7 @@ class CavaViewSet(WorkspaceScopeMixin, viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         from apps.audit.services.crud_hooks import SECTION, log_crud
+        from apps.notifications.services import notify_cava_created
 
         obj = serializer.save()
         ws = getattr(getattr(obj, "storage", None), "workspace", None)
@@ -118,9 +119,11 @@ class CavaViewSet(WorkspaceScopeMixin, viewsets.ModelViewSet):
             resource_id=obj.pk,
             resource_code=label,
         )
+        notify_cava_created(cava=obj, actor=self.request.user)
 
     def perform_update(self, serializer):
         from apps.audit.services.crud_hooks import SECTION, log_crud
+        from apps.notifications.services import notify_cava_updated
 
         obj = serializer.save()
         ws = getattr(getattr(obj, "storage", None), "workspace", None)
@@ -135,9 +138,11 @@ class CavaViewSet(WorkspaceScopeMixin, viewsets.ModelViewSet):
             resource_id=obj.pk,
             resource_code=label,
         )
+        notify_cava_updated(cava=obj, actor=self.request.user)
 
     def perform_destroy(self, instance):
         from apps.audit.services.crud_hooks import SECTION, log_crud
+        from apps.notifications.services import notify_cava_deleted
 
         ws = getattr(getattr(instance, "storage", None), "workspace", None)
         label = instance.name or instance.code or str(instance.pk)
@@ -152,6 +157,12 @@ class CavaViewSet(WorkspaceScopeMixin, viewsets.ModelViewSet):
             actor=self.request.user,
             resource_id=pk,
             resource_code=label,
+        )
+        notify_cava_deleted(
+            workspace=ws,
+            label=label,
+            resource_id=pk,
+            actor=self.request.user,
         )
 
     @action(detail=False, methods=["get"])
@@ -255,11 +266,8 @@ class CavaViewSet(WorkspaceScopeMixin, viewsets.ModelViewSet):
             if items:
                 cava_name = job.cava.name or job.cava.code or str(job.cava_id)
                 actor = self.request.user
-                actor_name = (
-                    (getattr(actor, "get_full_name", lambda: "")() or "").strip()
-                    or getattr(actor, "username", None)
-                    or "Usuario"
-                )
+                from apps.core.utils.display_name import user_display_name
+                actor_name = user_display_name(actor)
                 noun = "posición" if len(items) == 1 else "posiciones"
                 log_bulk(
                     workspace=job.workspace,
@@ -332,14 +340,12 @@ class CavaViewSet(WorkspaceScopeMixin, viewsets.ModelViewSet):
 
         from apps.audit.models import ActivitySection
         from apps.audit.services.view_log import log_unit
+        from apps.notifications.services import notify_cava_hilera_push
         from apps.workspaces.utils.tenant import get_workspace_for_request
 
         user = request.user
-        actor_name = (
-            (getattr(user, "get_full_name", lambda: "")() or "").strip()
-            or getattr(user, "username", None)
-            or "Usuario"
-        )
+        from apps.core.utils.display_name import user_display_name
+        actor_name = user_display_name(user)
         verb = "activó" if is_push else "desactivó"
         cava_label = cava.name or cava.code or str(cava.pk)
         ws = get_workspace_for_request(request) or getattr(
@@ -362,6 +368,13 @@ class CavaViewSet(WorkspaceScopeMixin, viewsets.ModelViewSet):
                 "is_push": is_push,
                 "updated": updated,
             },
+        )
+        notify_cava_hilera_push(
+            cava=cava,
+            hall=hall,
+            updated=updated,
+            is_push=is_push,
+            actor=user,
         )
         return Response({"updated": updated, "is_push": is_push})
 
@@ -438,11 +451,8 @@ class PositionViewSet(WorkspaceScopeMixin, viewsets.ModelViewSet):
         updated = serializer.save()
         user = self.request.user
         new_status = updated.status
-        actor_name = (
-            (getattr(user, "get_full_name", lambda: "")() or "").strip()
-            or getattr(user, "username", None)
-            or "Usuario"
-        )
+        from apps.core.utils.display_name import user_display_name
+        actor_name = user_display_name(user)
         from apps.audit.models import ActivitySection
         from apps.audit.services.view_log import log_unit
         from apps.storage.models import PositionMovement, PositionMovementType
@@ -507,11 +517,8 @@ class PositionViewSet(WorkspaceScopeMixin, viewsets.ModelViewSet):
         code = getattr(instance, "code", "") or str(instance.pk)
         pk = instance.pk
         user = self.request.user
-        actor_name = (
-            (getattr(user, "get_full_name", lambda: "")() or "").strip()
-            or getattr(user, "username", None)
-            or "Usuario"
-        )
+        from apps.core.utils.display_name import user_display_name
+        actor_name = user_display_name(user)
         instance.delete()
         notify_position_deleted(
             workspace=workspace,
@@ -746,11 +753,8 @@ class PositionViewSet(WorkspaceScopeMixin, viewsets.ModelViewSet):
 
                 ws = get_workspace_for_request(request)
                 noun = "posición" if touched == 1 else "posiciones"
-                actor_name = (
-                    (getattr(request.user, "get_full_name", lambda: "")() or "").strip()
-                    or getattr(request.user, "username", None)
-                    or "Usuario"
-                )
+                from apps.core.utils.display_name import user_display_name
+                actor_name = user_display_name(request.user)
                 notify_positions_bulk(
                     workspace=ws,
                     event=Notification.Event.UPDATED,
@@ -840,11 +844,8 @@ class PositionViewSet(WorkspaceScopeMixin, viewsets.ModelViewSet):
 
             ws = get_workspace_for_request(request)
             noun = "posición" if touched == 1 else "posiciones"
-            actor_name = (
-                (getattr(request.user, "get_full_name", lambda: "")() or "").strip()
-                or getattr(request.user, "username", None)
-                or "Usuario"
-            )
+            from apps.core.utils.display_name import user_display_name
+            actor_name = user_display_name(request.user)
             message = f"{actor_name} actualizó {touched} {noun}"
             notify_positions_bulk(
                 workspace=ws,
@@ -961,7 +962,32 @@ class PositionViewSet(WorkspaceScopeMixin, viewsets.ModelViewSet):
         position = self.get_object()
         position.refresh_label(persist=True)
         position.refresh_from_db(fields=["qr_code_image", "zpl_code", "updated_at"])
+
+        from apps.audit.models import ActivitySection
+        from apps.audit.services.view_log import log_unit
         from apps.common.utils.media_layout import media_url_with_bust
+        from apps.notifications.services import notify_position_updated
+        from apps.storage.models import PositionMovement, PositionMovementType
+        from apps.workspaces.utils.tenant import get_workspace_for_request
+
+        user = request.user
+        from apps.core.utils.display_name import user_display_name
+        actor_name = user_display_name(user)
+        code = position.code or str(position.pk)
+        ws = get_workspace_for_request(request)
+        log_unit(
+            workspace=ws,
+            section=ActivitySection.POSITION,
+            action="update",
+            summary=f"{actor_name} regeneró la etiqueta de {code}",
+            actor=user,
+            resource_id=position.pk,
+            resource_code=code,
+        )
+        PositionMovement.log_movement(
+            position, PositionMovementType.LABEL_REGENERATED
+        )
+        notify_position_updated(position=position, actor=user)
 
         qr_url = media_url_with_bust(
             position.qr_code_image,

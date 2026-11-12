@@ -7,10 +7,9 @@ from apps.audit.services.view_log import log_unit
 
 
 def actor_label(user) -> str:
-    if user is None:
-        return "Sistema"
-    full = (getattr(user, "get_full_name", lambda: "")() or "").strip()
-    return full or getattr(user, "username", None) or "Usuario"
+    from apps.core.utils.display_name import user_display_name
+
+    return user_display_name(user)
 
 
 def log_crud(

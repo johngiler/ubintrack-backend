@@ -140,11 +140,8 @@ class EntryViewSet(ClientScopeMixin, viewsets.ModelViewSet):
         from apps.audit.models import ActivitySection
         from apps.audit.services.view_log import log_unit, workspace_from_client
 
-        actor_name = (
-            (getattr(user, "get_full_name", lambda: "")() or "").strip()
-            or getattr(user, "username", None)
-            or "Usuario"
-        )
+        from apps.core.utils.display_name import user_display_name
+        actor_name = user_display_name(user)
         if old_status != entry.status:
             from apps.notifications.services import notify_entry_status
 
@@ -203,11 +200,8 @@ class EntryViewSet(ClientScopeMixin, viewsets.ModelViewSet):
         code = getattr(instance, "code", "") or str(instance.pk)
         pk = instance.pk
         user = self.request.user
-        actor_name = (
-            (getattr(user, "get_full_name", lambda: "")() or "").strip()
-            or getattr(user, "username", None)
-            or "Usuario"
-        )
+        from apps.core.utils.display_name import user_display_name
+        actor_name = user_display_name(user)
         instance.delete()
         notify_entry_deleted(
             workspace=workspace,
@@ -568,11 +562,8 @@ class ExitViewSet(ClientScopeMixin, viewsets.ModelViewSet):
         from apps.audit.services.view_log import log_unit, workspace_from_client
 
         notify_exit_created(exit_order=exit_order, actor=user)
-        actor_name = (
-            (getattr(user, "get_full_name", lambda: "")() or "").strip()
-            or getattr(user, "username", None)
-            or "Usuario"
-        )
+        from apps.core.utils.display_name import user_display_name
+        actor_name = user_display_name(user)
         log_unit(
             workspace=workspace_from_client(exit_order.client),
             section=ActivitySection.EXIT,
@@ -646,11 +637,8 @@ class ExitViewSet(ClientScopeMixin, viewsets.ModelViewSet):
         from apps.audit.models import ActivitySection
         from apps.audit.services.view_log import log_unit, workspace_from_client
 
-        actor_name = (
-            (getattr(user, "get_full_name", lambda: "")() or "").strip()
-            or getattr(user, "username", None)
-            or "Usuario"
-        )
+        from apps.core.utils.display_name import user_display_name
+        actor_name = user_display_name(user)
         if old_status != updated_instance.status:
             from apps.notifications.services import notify_exit_status
 
@@ -710,11 +698,8 @@ class ExitViewSet(ClientScopeMixin, viewsets.ModelViewSet):
         code = getattr(instance, "code", "") or str(instance.pk)
         pk = instance.pk
         user = self.request.user
-        actor_name = (
-            (getattr(user, "get_full_name", lambda: "")() or "").strip()
-            or getattr(user, "username", None)
-            or "Usuario"
-        )
+        from apps.core.utils.display_name import user_display_name
+        actor_name = user_display_name(user)
         instance.delete()
         notify_exit_deleted(
             workspace=workspace,
@@ -776,11 +761,8 @@ class ExitViewSet(ClientScopeMixin, viewsets.ModelViewSet):
             actor=request.user,
         )
         user = request.user
-        actor_name = (
-            (getattr(user, "get_full_name", lambda: "")() or "").strip()
-            or getattr(user, "username", None)
-            or "Usuario"
-        )
+        from apps.core.utils.display_name import user_display_name
+        actor_name = user_display_name(user)
         log_unit(
             workspace=workspace_from_client(exit_obj.client),
             section=ActivitySection.EXIT,
@@ -986,11 +968,8 @@ class ExitProductViewSet(ClientScopeMixin, viewsets.ModelViewSet):
             return
         exit_obj = ep.exit_product_group.exit
         user = self.request.user
-        actor_name = (
-            (getattr(user, "get_full_name", lambda: "")() or "").strip()
-            or getattr(user, "username", None)
-            or "Usuario"
-        )
+        from apps.core.utils.display_name import user_display_name
+        actor_name = user_display_name(user)
         bin_code = ""
         if extra and extra.get("bin_code"):
             bin_code = str(extra.get("bin_code") or "")
@@ -1408,11 +1387,8 @@ class ExitProductGroupViewSet(ClientScopeMixin, viewsets.ModelViewSet):
 
                 group = self.get_object()
                 exit_obj = group.exit
-                actor_name = (
-                    (getattr(user, "get_full_name", lambda: "")() or "").strip()
-                    or getattr(user, "username", None)
-                    or "Usuario"
-                )
+                from apps.core.utils.display_name import user_display_name
+                actor_name = user_display_name(user)
                 log_unit(
                     workspace=workspace_from_client(exit_obj.client),
                     section=ActivitySection.EXIT,

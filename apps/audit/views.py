@@ -71,26 +71,30 @@ class ActivityViewSet(viewsets.ReadOnlyModelViewSet):
         if section and section in ActivitySection.values:
             qs = qs.filter(section=section)
         has_system = qs.filter(actor__isnull=True).exists()
-        actors = (
+        from apps.core.utils.display_name import user_display_name
+
+        actor_ids = (
             qs.exclude(actor__isnull=True)
-            .values("actor_id", "actor__username", "actor__first_name", "actor__last_name", "actor__email")
-            .distinct()
-            .order_by("actor__username")[:200]
+            .values_list("actor_id", flat=True)
+            .distinct()[:200]
         )
+        User = request.user.__class__
+        users = {
+            u.id: u
+            for u in User.objects.filter(id__in=actor_ids).only(
+                "id", "full_name", "first_name", "last_name", "username", "email"
+            )
+        }
         results = []
-        for row in actors:
-            first = (row.get("actor__first_name") or "").strip()
-            last = (row.get("actor__last_name") or "").strip()
-            full = f"{first} {last}".strip()
+        for actor_id in actor_ids:
+            user = users.get(actor_id)
             results.append(
                 {
-                    "id": row["actor_id"],
-                    "display": full
-                    or row.get("actor__email")
-                    or row.get("actor__username")
-                    or str(row["actor_id"]),
+                    "id": actor_id,
+                    "display": user_display_name(user),
                 }
             )
+        results.sort(key=lambda row: (row["display"] or "").lower())
         return Response({"results": results, "has_system": has_system})
 
 

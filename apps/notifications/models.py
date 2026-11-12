@@ -14,6 +14,7 @@ class Notification(models.Model):
         EXIT = "exit", "Salida"
         BIN = "bin", "Bin"
         POSITION = "position", "Posición"
+        CAVA = "cava", "Cava"
 
     class Target(models.TextChoices):
         ENTRY_DETAIL = "entry_detail", "Detalle entrada"

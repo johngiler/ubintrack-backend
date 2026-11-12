@@ -65,7 +65,9 @@ def _role_label(user) -> str:
 
 def presence_user_payload(user, *, status: str = STATUS_ACTIVE, last_seen: str | None = None) -> dict[str, Any]:
     cleaned = status if status in VALID_STATUSES else STATUS_ACTIVE
-    name = (getattr(user, "full_name", None) or "").strip() or user.get_username()
+    from apps.core.utils.display_name import user_display_name
+
+    name = user_display_name(user)
     return {
         "id": user.pk,
         "display_name": name,

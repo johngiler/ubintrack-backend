@@ -46,11 +46,9 @@ class CustomObtainAuthToken(ObtainAuthToken):
             from apps.audit.models import ActivitySection
             from apps.audit.services.view_log import log_unit
 
-            display = (
-                (getattr(user, "get_full_name", lambda: "")() or "").strip()
-                or getattr(user, "username", None)
-                or str(user.pk)
-            )
+            from apps.core.utils.display_name import user_display_name
+
+            display = user_display_name(user)
             log_unit(
                 workspace=ws,
                 section=ActivitySection.USER,

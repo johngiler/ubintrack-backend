@@ -335,11 +335,8 @@ class BinViewSet(ClientScopeMixin, viewsets.ModelViewSet):
             ws = get_workspace_for_request(request)
             verb = "activó" if is_active else "desactivó"
             noun = "bin" if updated == 1 else "bins"
-            actor_name = (
-                (getattr(request.user, "get_full_name", lambda: "")() or "").strip()
-                or getattr(request.user, "username", None)
-                or "Usuario"
-            )
+            from apps.core.utils.display_name import user_display_name
+            actor_name = user_display_name(request.user)
             message = f"{actor_name} {verb} {updated} {noun}"
             notify_bins_bulk(
                 workspace=ws,
@@ -395,11 +392,8 @@ class BinViewSet(ClientScopeMixin, viewsets.ModelViewSet):
         from apps.audit.services.view_log import log_unit
 
         notify_bin_created(bin_obj=bin_obj, actor=user)
-        actor_name = (
-            (getattr(user, "get_full_name", lambda: "")() or "").strip()
-            or getattr(user, "username", None)
-            or "Usuario"
-        )
+        from apps.core.utils.display_name import user_display_name
+        actor_name = user_display_name(user)
         ws = getattr(bin_obj, "workspace", None) or getattr(
             getattr(bin_obj, "client", None), "workspace", None
         )
@@ -461,11 +455,8 @@ class BinViewSet(ClientScopeMixin, viewsets.ModelViewSet):
         from apps.audit.models import ActivitySection
         from apps.audit.services.view_log import log_unit
 
-        actor_name = (
-            (getattr(user, "get_full_name", lambda: "")() or "").strip()
-            or getattr(user, "username", None)
-            or "Usuario"
-        )
+        from apps.core.utils.display_name import user_display_name
+        actor_name = user_display_name(user)
         ws = getattr(bin_obj, "workspace", None) or getattr(
             getattr(bin_obj, "client", None), "workspace", None
         )
@@ -575,11 +566,8 @@ class BinViewSet(ClientScopeMixin, viewsets.ModelViewSet):
             actor=request.user,
         )
         user = request.user
-        actor_name = (
-            (getattr(user, "get_full_name", lambda: "")() or "").strip()
-            or getattr(user, "username", None)
-            or "Usuario"
-        )
+        from apps.core.utils.display_name import user_display_name
+        actor_name = user_display_name(user)
         ws = getattr(bin_instance, "workspace", None) or getattr(
             getattr(bin_instance, "client", None), "workspace", None
         )
@@ -627,11 +615,8 @@ class BinViewSet(ClientScopeMixin, viewsets.ModelViewSet):
         code = getattr(instance, "code", "") or str(instance.pk)
         pk = instance.pk
         user = self.request.user
-        actor_name = (
-            (getattr(user, "get_full_name", lambda: "")() or "").strip()
-            or getattr(user, "username", None)
-            or "Usuario"
-        )
+        from apps.core.utils.display_name import user_display_name
+        actor_name = user_display_name(user)
 
         # Liberar la posición si existe (cascada: timeline sí, campanita no)
         if instance.position:
@@ -838,7 +823,27 @@ class BinViewSet(ClientScopeMixin, viewsets.ModelViewSet):
         success = bin_instance.generate_tag()
         if success:
             bin_instance.refresh_from_db(fields=["tag_image", "zpl_code", "updated_at"])
+            from apps.audit.models import ActivitySection
+            from apps.audit.services.view_log import log_unit
             from apps.common.utils.media_layout import media_url_with_bust
+            from apps.notifications.services import notify_bin_updated
+            from apps.workspaces.utils.tenant import get_workspace_for_request
+
+            user = request.user
+            from apps.core.utils.display_name import user_display_name
+            actor_name = user_display_name(user)
+            code = bin_instance.code or str(bin_instance.pk)
+            ws = get_workspace_for_request(request)
+            log_unit(
+                workspace=ws,
+                section=ActivitySection.BIN,
+                action="update",
+                summary=f"{actor_name} regeneró la etiqueta de {code}",
+                actor=user,
+                resource_id=bin_instance.pk,
+                resource_code=code,
+            )
+            notify_bin_updated(bin_obj=bin_instance, actor=user)
 
             tag_url = media_url_with_bust(
                 bin_instance.tag_image,

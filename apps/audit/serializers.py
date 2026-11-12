@@ -4,12 +4,9 @@ from apps.audit.models import ActivityBatch, ActivityBatchItem, ViewActivityEntr
 
 
 def _actor_display(user) -> str:
-    if user is None:
-        return "Sistema"
-    full = (getattr(user, "get_full_name", lambda: "")() or "").strip()
-    if full:
-        return full
-    return getattr(user, "email", None) or getattr(user, "username", None) or "Usuario"
+    from apps.core.utils.display_name import user_display_name
+
+    return user_display_name(user)
 
 
 class ViewActivityEntrySerializer(serializers.ModelSerializer):

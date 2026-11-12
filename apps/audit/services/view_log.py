@@ -7,10 +7,9 @@ from apps.audit.services.record import record_activity, record_activity_batch
 
 
 def _actor_name(actor) -> str:
-    if actor is None:
-        return "Sistema"
-    full = (getattr(actor, "get_full_name", lambda: "")() or "").strip()
-    return full or getattr(actor, "username", None) or "Usuario"
+    from apps.core.utils.display_name import user_display_name
+
+    return user_display_name(actor)
 
 
 def log_unit(

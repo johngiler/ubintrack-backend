@@ -16,16 +16,9 @@ logger = logging.getLogger(__name__)
 
 
 def _actor_label(user) -> str:
-    if user is None:
-        return "Sistema"
-    full = (getattr(user, "get_full_name", lambda: "")() or "").strip()
-    if full:
-        return full
-    return (
-        getattr(user, "email", None)
-        or getattr(user, "username", None)
-        or "Usuario"
-    )
+    from apps.core.utils.display_name import user_display_name
+
+    return user_display_name(user)
 
 
 def _choice_label(choice_enum, value: str) -> str:
@@ -467,6 +460,85 @@ def notify_positions_bulk(
     )
 
 
+def _workspace_from_cava(cava):
+    storage = getattr(cava, "storage", None)
+    return getattr(storage, "workspace", None) if storage else None
+
+
+def notify_cava_created(*, cava, actor=None) -> list[Notification]:
+    workspace = _workspace_from_cava(cava)
+    label = (getattr(cava, "name", None) or getattr(cava, "code", None) or str(cava.pk))
+    actor_name = _actor_label(actor)
+    return broadcast_workspace_staff(
+        workspace=workspace,
+        event=Notification.Event.CREATED,
+        artifact=Notification.Artifact.CAVA,
+        target=Notification.Target.CAVAS_LIST,
+        message=f"{actor_name} creó la cava {label}",
+        actor=actor,
+        resource_id=cava.pk,
+        resource_code=str(label)[:64],
+    )
+
+
+def notify_cava_updated(*, cava, actor=None) -> list[Notification]:
+    workspace = _workspace_from_cava(cava)
+    label = (getattr(cava, "name", None) or getattr(cava, "code", None) or str(cava.pk))
+    actor_name = _actor_label(actor)
+    return broadcast_workspace_staff(
+        workspace=workspace,
+        event=Notification.Event.UPDATED,
+        artifact=Notification.Artifact.CAVA,
+        target=Notification.Target.CAVAS_LIST,
+        message=f"{actor_name} actualizó la cava {label}",
+        actor=actor,
+        resource_id=cava.pk,
+        resource_code=str(label)[:64],
+    )
+
+
+def notify_cava_deleted(*, workspace, label: str, resource_id: int | None = None, actor=None) -> list[Notification]:
+    actor_name = _actor_label(actor)
+    return broadcast_workspace_staff(
+        workspace=workspace,
+        event=Notification.Event.DELETED,
+        artifact=Notification.Artifact.CAVA,
+        target=Notification.Target.CAVAS_LIST,
+        message=f"{actor_name} eliminó la cava {label}",
+        actor=actor,
+        resource_id=resource_id,
+        resource_code=str(label)[:64],
+    )
+
+
+def notify_cava_hilera_push(
+    *,
+    cava,
+    hall: str,
+    updated: int,
+    is_push: bool,
+    actor=None,
+) -> list[Notification]:
+    if updated <= 0:
+        return []
+    workspace = _workspace_from_cava(cava)
+    label = (getattr(cava, "name", None) or getattr(cava, "code", None) or str(cava.pk))
+    actor_name = _actor_label(actor)
+    verb = "activó" if is_push else "desactivó"
+    noun = _plural(updated, "posición", "posiciones")
+    return broadcast_workspace_staff(
+        workspace=workspace,
+        event=Notification.Event.UPDATED,
+        artifact=Notification.Artifact.CAVA,
+        target=Notification.Target.CAVAS_LIST,
+        message=f"{actor_name} {verb} push en hilera {hall} de {label} ({updated} {noun})",
+        actor=actor,
+        resource_id=cava.pk,
+        resource_code=str(label)[:64],
+        affected_count=updated,
+    )
+
+
 def notify_bulk_job_finished(job) -> list[Notification]:
     """Aviso agrupado + audit macro/lote al terminar un BulkOperationJob."""
     from apps.audit.models import ActivityBatch, ActivitySection
@@ -527,8 +599,10 @@ def notify_bulk_job_finished(job) -> list[Notification]:
 
     if kind == BulkOperationJob.Kind.BIN_PRINT:
         count = int(result.get("printed") or 0)
-        if count and items:
-            message = f"{_actor_label(actor)} imprimió {count} etiquetas de bins"
+        if not count:
+            return []
+        message = f"{_actor_label(actor)} imprimió {count} etiquetas de bins"
+        if items:
             log_bulk(
                 workspace=workspace,
                 section=ActivitySection.BIN,
@@ -538,12 +612,25 @@ def notify_bulk_job_finished(job) -> list[Notification]:
                 items=items,
                 actor=actor,
             )
-        return []
+        return notify_bins_bulk(
+            workspace=workspace,
+            event=Notification.Event.UPDATED,
+            message=message,
+            count=count,
+            actor=actor,
+        )
 
     if kind == BulkOperationJob.Kind.POSITION_PRINT:
         count = int(result.get("printed") or 0)
-        if count and items:
-            message = f"{_actor_label(actor)} imprimió {count} etiquetas de posiciones"
+        if not count:
+            return []
+        # `printed` = hojas físicas; `positions` = posiciones tocadas (si viene).
+        positions_n = int(result.get("positions") or count)
+        message = (
+            f"{_actor_label(actor)} imprimió {count} etiquetas "
+            f"({positions_n} posiciones)"
+        )
+        if items:
             log_bulk(
                 workspace=workspace,
                 section=ActivitySection.POSITION,
@@ -553,12 +640,20 @@ def notify_bulk_job_finished(job) -> list[Notification]:
                 items=items,
                 actor=actor,
             )
-        return []
+        return notify_positions_bulk(
+            workspace=workspace,
+            event=Notification.Event.UPDATED,
+            message=message,
+            count=positions_n,
+            actor=actor,
+        )
 
     if kind == BulkOperationJob.Kind.BIN_REGENERATE_TAGS:
         count = int(result.get("regenerated") or 0)
-        if count and items:
-            message = f"{_actor_label(actor)} regeneró {count} etiquetas de bins"
+        if not count:
+            return []
+        message = f"{_actor_label(actor)} regeneró {count} etiquetas de bins"
+        if items:
             log_bulk(
                 workspace=workspace,
                 section=ActivitySection.BIN,
@@ -568,12 +663,20 @@ def notify_bulk_job_finished(job) -> list[Notification]:
                 items=items,
                 actor=actor,
             )
-        return []
+        return notify_bins_bulk(
+            workspace=workspace,
+            event=Notification.Event.UPDATED,
+            message=message,
+            count=count,
+            actor=actor,
+        )
 
     if kind == BulkOperationJob.Kind.POSITION_REGENERATE_TAGS:
         count = int(result.get("regenerated") or 0)
-        if count and items:
-            message = f"{_actor_label(actor)} regeneró {count} etiquetas de posiciones"
+        if not count:
+            return []
+        message = f"{_actor_label(actor)} regeneró {count} etiquetas de posiciones"
+        if items:
             log_bulk(
                 workspace=workspace,
                 section=ActivitySection.POSITION,
@@ -583,6 +686,12 @@ def notify_bulk_job_finished(job) -> list[Notification]:
                 items=items,
                 actor=actor,
             )
-        return []
+        return notify_positions_bulk(
+            workspace=workspace,
+            event=Notification.Event.UPDATED,
+            message=message,
+            count=count,
+            actor=actor,
+        )
 
     return []

@@ -125,12 +125,27 @@ class CustomUser(AbstractUser):
 
         return False
 
+    def get_full_name(self):
+        """Nombre para UI: campo `full_name` del WMS (no first/last de AbstractUser)."""
+        name = (self.full_name or "").strip()
+        if name:
+            return name
+        first = (self.first_name or "").strip()
+        last = (self.last_name or "").strip()
+        return f"{first} {last}".strip()
+
+    def get_short_name(self):
+        name = self.get_full_name()
+        if name:
+            return name.split()[0]
+        return (self.username or "").split("@", 1)[0] or self.username
+
     class Meta:
         verbose_name = 'usuario'
         verbose_name_plural = 'usuarios'
 
     def __str__(self):
-        return self.username
+        return self.get_full_name() or self.username
 
 
 class CustomPermission(BaseModel):
