@@ -19,13 +19,23 @@ from apps.common.utils.pdf_branding import (
 logger = logging.getLogger(__name__)
 
 
+def _workspace_for_bin(bin_instance):
+    from apps.workspaces.utils.label_geometry import load_workspace_for_label
+
+    ws_id = getattr(bin_instance, "workspace_id", None)
+    if not ws_id:
+        ws = getattr(bin_instance, "workspace", None) or workspace_from_client(
+            getattr(bin_instance, "client", None)
+        )
+        ws_id = getattr(ws, "pk", None) if ws is not None else None
+    return load_workspace_for_label(workspace_id=ws_id)
+
+
 def generate_bin_tag(bin_instance):
     """Etiqueta de bin (preview): campos + QR; tamaño según medida del owner."""
     from apps.workspaces.utils.label_geometry import label_geometry, scale_dot
 
-    workspace = getattr(bin_instance, "workspace", None) or workspace_from_client(
-        getattr(bin_instance, "client", None)
-    )
+    workspace = _workspace_for_bin(bin_instance)
     geo = label_geometry(workspace)
     # Preview baseline 4×2 @ 300 DPI (1200×600); escala con pulgadas del owner.
     tag_width = max(200, scale_dot(1200, geo["sx"]))
@@ -168,9 +178,7 @@ def generate_bin_tag_zpl(bin_instance):
             f"^FO{value_x},{y}^A0N,{size},{size}^FD{value}^FS\n"
         )
 
-    workspace = getattr(bin_instance, "workspace", None) or workspace_from_client(
-        getattr(bin_instance, "client", None)
-    )
+    workspace = _workspace_for_bin(bin_instance)
     geo = label_geometry(workspace)
     sx, sy = geo["sx"], geo["sy"]
     pw, ll = geo["pw"], geo["ll"]

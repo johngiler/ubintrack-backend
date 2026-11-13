@@ -813,8 +813,11 @@ class BinViewSet(ClientScopeMixin, viewsets.ModelViewSet):
         if is_client_user(request.user):
             return Response({"detail": "No autorizado."}, status=status.HTTP_403_FORBIDDEN)
 
+        from apps.inventory.services import generate_bin_tag_zpl
+        from apps.workspaces.utils.tenant import get_workspace_for_request
+
         bin_instance = self.get_object()
-        if not bin_instance.zpl_code:
+        if not bin_instance.code:
             return Response(
                 {
                     "success": False,
@@ -822,8 +825,6 @@ class BinViewSet(ClientScopeMixin, viewsets.ModelViewSet):
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
-
-        from apps.workspaces.utils.tenant import get_workspace_for_request
 
         workspace = getattr(bin_instance, "workspace", None) or get_workspace_for_request(
             request
@@ -833,7 +834,9 @@ class BinViewSet(ClientScopeMixin, viewsets.ModelViewSet):
                 {"success": False, "message": USER_PRINTER_NOT_CONFIGURED},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        if not print_to_zebra(bin_instance.zpl_code, workspace=workspace):
+        # ZPL fresco según medida/DPI del owner (no el ZPL guardado antiguo).
+        zpl = generate_bin_tag_zpl(bin_instance)
+        if not zpl or not print_to_zebra(zpl, workspace=workspace):
             return Response(
                 {"success": False, "message": USER_PRINT_FAILED},
                 status=status.HTTP_400_BAD_REQUEST,

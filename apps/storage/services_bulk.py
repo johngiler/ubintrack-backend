@@ -64,11 +64,12 @@ def run_position_print(job: BulkOperationJob) -> dict[str, Any]:
         for p in storage_models.Position.objects.filter(
             id__in=ids,
             cava__storage__workspace=job.workspace,
-        ).only("id", "code", "level", "zpl_code")
+        ).only("id", "code", "level", "zpl_code", "workspace_id")
     }
     ordered = [by_id[i] for i in ids if i in by_id]
-    skipped = [p.code for p in ordered if not p.zpl_code]
-    printable = [p for p in ordered if p.zpl_code]
+    # Imprime si hay código; el ZPL se regenera con la medida del owner.
+    skipped = [p.code for p in ordered if not p.code]
+    printable = [p for p in ordered if p.code]
     if not printable:
         raise RuntimeError("Ninguna posición tiene etiqueta para imprimir.")
 

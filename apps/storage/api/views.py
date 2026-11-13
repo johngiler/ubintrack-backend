@@ -944,8 +944,10 @@ class PositionViewSet(WorkspaceScopeMixin, viewsets.ModelViewSet):
         if is_client_user(request.user):
             return Response({"detail": "No autorizado."}, status=status.HTTP_403_FORBIDDEN)
 
+        from apps.storage.services import generate_position_tag_zpl
+
         position = self.get_object()
-        if not position.zpl_code:
+        if not position.code:
             return Response(
                 {
                     "success": False,
@@ -962,7 +964,9 @@ class PositionViewSet(WorkspaceScopeMixin, viewsets.ModelViewSet):
                 {"success": False, "message": USER_PRINTER_NOT_CONFIGURED},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        if not print_to_zebra(position.zpl_code, workspace=workspace):
+        # ZPL fresco según medida/DPI del owner (no el ZPL guardado antiguo).
+        zpl = generate_position_tag_zpl(position)
+        if not zpl or not print_to_zebra(zpl, workspace=workspace):
             return Response(
                 {"success": False, "message": USER_PRINT_FAILED},
                 status=status.HTTP_400_BAD_REQUEST,

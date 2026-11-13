@@ -186,24 +186,26 @@ def _zpl_safe(value) -> str:
 
 
 def _workspace_for_position(position):
-    ws = getattr(position, "workspace", None)
-    if ws is not None:
-        return ws
-    cava = getattr(position, "cava", None)
-    storage = getattr(cava, "storage", None) if cava is not None else None
-    return getattr(storage, "workspace", None)
+    from apps.workspaces.utils.label_geometry import load_workspace_for_label
+
+    ws_id = getattr(position, "workspace_id", None)
+    if not ws_id:
+        ws = getattr(position, "workspace", None)
+        ws_id = getattr(ws, "pk", None) if ws is not None else None
+    if not ws_id:
+        cava = getattr(position, "cava", None)
+        storage = getattr(cava, "storage", None) if cava is not None else None
+        ws = getattr(storage, "workspace", None)
+        ws_id = getattr(ws, "pk", None) or getattr(storage, "workspace_id", None)
+    return load_workspace_for_label(workspace_id=ws_id)
 
 
-def generate_position_tag_zpl(position):
-    """ZPL de posición (layout baseline 4×2 @ 203; escala por owner)."""
-    from apps.workspaces.utils.label_geometry import label_geometry, scale_dot
+def _position_zpl_landscape(code: str, level: str, geo: dict) -> str:
+    """4×2 (u horizontal): texto izq. + QR der., escalado a pw×ll del owner."""
+    from apps.workspaces.utils.label_geometry import scale_dot
 
-    code = _zpl_safe(getattr(position, "code", None))
-    level = _zpl_safe(getattr(position, "level", None))
-    geo = label_geometry(_workspace_for_position(position))
     sx, sy = geo["sx"], geo["sy"]
     pw, ll = geo["pw"], geo["ll"]
-
     return (
         f"^XA\n"
         f"^PW{pw}\n"
@@ -217,6 +219,54 @@ def generate_position_tag_zpl(position):
         f"^BQN,2,{max(2, scale_dot(7, min(sx, sy)))}^FDMA,{code}^FS\n"
         f"^XZ\n"
     )
+
+
+def _position_zpl_portrait(code: str, level: str, geo: dict) -> str:
+    """Etiqueta más alta que ancha: NIVEL → QR → código (centrado)."""
+    pw, ll = geo["pw"], geo["ll"]
+    margin = max(12, min(pw, ll) // 20)
+    title_h = max(28, min(72, ll // 12))
+    code_h = max(22, min(56, ll // 14))
+    title_y = margin
+    usable = max(40, min(pw, ll) - margin * 2)
+    target_qr = int(usable * 0.55)
+    qr_mag = max(3, min(12, target_qr // 25))
+    qr_size = qr_mag * 25
+    qr_x = max(0, (pw - qr_size) // 2)
+    qr_y = title_y + title_h + margin
+    code_y = qr_y + qr_size + margin
+    if code_y + code_h + margin > ll:
+        code_y = max(qr_y + qr_size // 2, ll - code_h - margin)
+        qr_y = max(title_y + title_h + margin // 2, code_y - qr_size - margin)
+        qr_y = max(title_y + title_h, qr_y)
+
+    nivel_text = f"NIVEL {level}"
+    return (
+        f"^XA\n"
+        f"^PW{pw}\n"
+        f"^LL{ll}\n"
+        f"^LH0,0\n"
+        f"^FO0,{title_y}^A0N,{title_h},{title_h}^FB{pw},1,0,C^FD{nivel_text}^FS\n"
+        f"^FO{qr_x},{qr_y}^BQN,2,{qr_mag}^FDMA,{code}^FS\n"
+        f"^FO0,{code_y}^A0N,{code_h},{code_h}^FB{pw},1,0,C^FD{code}^FS\n"
+        f"^XZ\n"
+    )
+
+
+def generate_position_tag_zpl(position):
+    """
+    ZPL de posición según medida/DPI del owner (Configuración del propietario).
+    Landscape (p. ej. 4×2): texto izq. + QR der.
+    Portrait: NIVEL → QR → código centrados.
+    """
+    from apps.workspaces.utils.label_geometry import label_geometry
+
+    code = _zpl_safe(getattr(position, "code", None))
+    level = _zpl_safe(getattr(position, "level", None))
+    geo = label_geometry(_workspace_for_position(position))
+    if geo["landscape"]:
+        return _position_zpl_landscape(code, level, geo)
+    return _position_zpl_portrait(code, level, geo)
 
 
 def generate_position_multi_tag_zpl(positions) -> str:

@@ -54,15 +54,24 @@ def run_bin_regenerate_tags(job: BulkOperationJob) -> dict[str, Any]:
 
 
 def run_bin_print(job: BulkOperationJob) -> dict[str, Any]:
+    from apps.inventory.services import generate_bin_tag_zpl
+
     ids = job.item_ids or []
     bins = list(
         inventory_models.Bin.objects.filter(id__in=ids, workspace=job.workspace)
-        .only("id", "code", "zpl_code")
+        .select_related("client", "position", "workspace")
+        .prefetch_related("bin_products__entry_product__product")
         .order_by("code")
     )
-    skipped = [b.code for b in bins if not b.zpl_code]
-    printable = [b for b in bins if b.zpl_code]
-    zpl_jobs = [b.zpl_code for b in printable]
+    skipped = [b.code for b in bins if not b.code]
+    printable = [b for b in bins if b.code]
+    zpl_jobs = []
+    for bin_obj in printable:
+        zpl = generate_bin_tag_zpl(bin_obj)
+        if zpl:
+            zpl_jobs.append(zpl)
+        else:
+            skipped.append(bin_obj.code)
     if not zpl_jobs:
         raise RuntimeError("Ningún bin tiene etiqueta para imprimir.")
     if not printer_is_configured(job.workspace):
