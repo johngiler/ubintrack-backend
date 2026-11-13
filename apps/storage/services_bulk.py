@@ -10,6 +10,7 @@ from apps.common.utils.zebra import (
     USER_PRINTER_NOT_CONFIGURED,
     printer_is_configured,
     print_to_zebra,
+    print_zpl_sheets,
 )
 from apps.storage import models as storage_models
 
@@ -48,14 +49,16 @@ def run_position_regenerate_tags(job: BulkOperationJob) -> dict[str, Any]:
 
 def run_position_print(job: BulkOperationJob) -> dict[str, Any]:
     from apps.storage.services import generate_position_multi_tag_zpl
+    from apps.workspaces.utils.label_geometry import max_positions_per_label
 
     ids = job.item_ids or []
     params = (job.result or {}).get("params") or {}
+    max_per = max_positions_per_label(job.workspace)
     try:
-        per_label = int(params.get("per_label") or 1)
+        per_label = int(params.get("per_label") or max_per)
     except (TypeError, ValueError):
-        per_label = 1
-    per_label = max(1, min(per_label, 4))
+        per_label = max_per
+    per_label = max(1, min(per_label, max_per))
     same_copies = bool(params.get("same_position_copies"))
 
     # Conservar el orden de selección del job.
@@ -91,9 +94,14 @@ def run_position_print(job: BulkOperationJob) -> dict[str, Any]:
 
     if not sheets:
         raise RuntimeError("Ninguna posición tiene etiqueta para imprimir.")
-    if not printer_is_configured(job.workspace):
+    # Workspace fresco (IP/puerto del owner); evita instancia stale en el worker.
+    from apps.workspaces.utils.label_geometry import load_workspace_for_label
+
+    workspace = load_workspace_for_label(workspace_id=job.workspace_id) or job.workspace
+    if not printer_is_configured(workspace):
         raise RuntimeError(USER_PRINTER_NOT_CONFIGURED)
-    if not print_to_zebra("\n".join(sheets), workspace=job.workspace):
+    # Una conexión por hoja: varios ^GFA juntos saturan/timeout la impresora.
+    if not print_zpl_sheets(sheets, workspace=workspace):
         raise RuntimeError(USER_PRINT_FAILED)
     mode_label = "copias iguales" if same_copies else "distintas"
     parts = [

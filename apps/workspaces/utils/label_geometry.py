@@ -92,3 +92,28 @@ def label_geometry(workspace=None) -> dict[str, Any]:
 
 def scale_dot(value: float | int, factor: float) -> int:
     return max(0, int(round(float(value) * factor)))
+
+
+# Celda de packing ≈ 2" × 2" (paso fijo).
+POSITION_CELL_INCHES = Decimal("2.00")
+
+
+def position_label_grid(workspace=None) -> dict[str, int]:
+    """
+    Cuántas posiciones caben por etiqueta según medida del owner.
+    cols = floor(ancho / 2"), rows = floor(alto / 2"), mín. 1.
+    """
+    geo = label_geometry(workspace)
+    width_in = Decimal(str(geo["width_in"]))
+    height_in = Decimal(str(geo["height_in"]))
+    cols = max(1, int(width_in // POSITION_CELL_INCHES))
+    rows = max(1, int(height_in // POSITION_CELL_INCHES))
+    return {
+        "cols": cols,
+        "rows": rows,
+        "max_per_label": cols * rows,
+    }
+
+
+def max_positions_per_label(workspace=None) -> int:
+    return position_label_grid(workspace)["max_per_label"]

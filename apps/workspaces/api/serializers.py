@@ -9,6 +9,8 @@ class WorkspacePublicSerializer(serializers.ModelSerializer):
     logo_url = serializers.SerializerMethodField()
     logo_mark_url = serializers.SerializerMethodField()
     favicon_url = serializers.SerializerMethodField()
+    # Medida de etiqueta (sin IP): packing de impresión en el WMS.
+    max_positions_per_label = serializers.SerializerMethodField()
 
     class Meta:
         model = Workspace
@@ -26,6 +28,9 @@ class WorkspacePublicSerializer(serializers.ModelSerializer):
             "logo_url",
             "logo_mark_url",
             "favicon_url",
+            "label_width_in",
+            "label_height_in",
+            "max_positions_per_label",
         )
 
     def _absolute_media(self, obj, field_name: str) -> str | None:
@@ -49,6 +54,11 @@ class WorkspacePublicSerializer(serializers.ModelSerializer):
 
     def get_favicon_url(self, obj):
         return self._absolute_media(obj, "favicon")
+
+    def get_max_positions_per_label(self, obj) -> int:
+        from apps.workspaces.utils.label_geometry import max_positions_per_label
+
+        return max_positions_per_label(obj)
 
 
 PRINTER_SETTINGS_FIELDS = (

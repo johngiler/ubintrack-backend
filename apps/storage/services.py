@@ -200,125 +200,205 @@ def _workspace_for_position(position):
     return load_workspace_for_label(workspace_id=ws_id)
 
 
-def _position_zpl_landscape(code: str, level: str, geo: dict) -> str:
-    """4×2 (u horizontal): texto izq. + QR der., escalado a pw×ll del owner."""
-    from apps.workspaces.utils.label_geometry import scale_dot
-
-    sx, sy = geo["sx"], geo["sy"]
-    pw, ll = geo["pw"], geo["ll"]
-    return (
-        f"^XA\n"
-        f"^PW{pw}\n"
-        f"^LL{ll}\n"
-        f"^LH0,0\n"
-        f"^FO{scale_dot(16, sx)},{scale_dot(50, sy)}"
-        f"^A0N,{scale_dot(70, sy)},{scale_dot(70, sx)}^FDNIVEL {level}^FS\n"
-        f"^FO{scale_dot(16, sx)},{scale_dot(160, sy)}"
-        f"^A0N,{scale_dot(42, sy)},{scale_dot(42, sx)}^FD{code}^FS\n"
-        f"^FO{scale_dot(500, sx)},{scale_dot(28, sy)}"
-        f"^BQN,2,{max(2, scale_dot(7, min(sx, sy)))}^FDMA,{code}^FS\n"
-        f"^XZ\n"
-    )
+def _position_label_font(size: int):
+    """Fuente sans para arte de posición (tamaño en px = dots @ DPI etiqueta)."""
+    size = max(10, int(size))
+    candidates = [
+        os.path.join(settings.BASE_DIR, "arial.ttf"),
+        os.path.join(settings.BASE_DIR, "Arial.ttf"),
+        "/System/Library/Fonts/Supplemental/Arial.ttf",
+        "/Library/Fonts/Arial.ttf",
+        "Arial",
+        "DejaVuSans",
+    ]
+    for path in candidates:
+        try:
+            return ImageFont.truetype(path, size)
+        except OSError:
+            continue
+    return ImageFont.load_default()
 
 
-def _position_zpl_portrait(code: str, level: str, geo: dict) -> str:
-    """Etiqueta más alta que ancha: NIVEL → QR → código (centrado)."""
-    pw, ll = geo["pw"], geo["ll"]
-    margin = max(12, min(pw, ll) // 20)
-    title_h = max(28, min(72, ll // 12))
-    code_h = max(22, min(56, ll // 14))
-    title_y = margin
-    usable = max(40, min(pw, ll) - margin * 2)
-    target_qr = int(usable * 0.55)
-    qr_mag = max(3, min(12, target_qr // 25))
-    qr_size = qr_mag * 25
-    qr_x = max(0, (pw - qr_size) // 2)
-    qr_y = title_y + title_h + margin
-    code_y = qr_y + qr_size + margin
-    if code_y + code_h + margin > ll:
-        code_y = max(qr_y + qr_size // 2, ll - code_h - margin)
-        qr_y = max(title_y + title_h + margin // 2, code_y - qr_size - margin)
-        qr_y = max(title_y + title_h, qr_y)
+def _text_bbox(draw, text: str, font):
+    text = str(text or "")
+    try:
+        bbox = draw.textbbox((0, 0), text, font=font)
+        return bbox[2] - bbox[0], bbox[3] - bbox[1], bbox[0], bbox[1]
+    except AttributeError:
+        tw = int(draw.textlength(text, font=font))
+        th = int(getattr(font, "size", 20) or 20)
+        return tw, th, 0, 0
+
+
+def _draw_text_top_centered(draw, center_x: int, top_y: int, text: str, font, *, bold=True):
+    """Dibuja texto con borde superior en top_y y centro horizontal en center_x."""
+    text = str(text or "")
+    tw, th, ox, oy = _text_bbox(draw, text, font)
+    x = int(center_x - tw / 2 - ox)
+    y = int(top_y - oy)
+    offsets = ((0, 0), (1, 0), (0, 1), (1, 1)) if bold else ((0, 0),)
+    for dx, dy in offsets:
+        draw.text((x + dx, y + dy), text, font=font, fill=0)
+    return th
+
+
+def _render_position_cell_bitmap(code: str, level: str, cell_w: int, cell_h: int) -> Image.Image:
+    """
+    Arte en dots (1 px = 1 dot @ DPI del owner).
+    4×2" → celdas 2×2"; título/QR/código con el mismo gap y el mismo eje X.
+    """
+    cell_w = max(64, int(cell_w))
+    cell_h = max(64, int(cell_h))
+    img = Image.new("L", (cell_w, cell_h), 255)
+    draw = ImageDraw.Draw(img)
+
+    # Márgenes ~5% de la celda 2×2 @ 203 DPI (406 dots → ~20).
+    pad = max(12, int(min(cell_w, cell_h) * 0.05))
+    gap = max(10, int(min(cell_w, cell_h) * 0.035))  # mismo aire arriba y abajo del QR
+
+    title_size = max(28, min(58, int(cell_h * 0.11)))
+    code_size = max(22, min(46, int(cell_h * 0.09)))
+    title_font = _position_label_font(title_size)
+    code_font = _position_label_font(code_size)
 
     nivel_text = f"NIVEL {level}"
-    return (
-        f"^XA\n"
-        f"^PW{pw}\n"
-        f"^LL{ll}\n"
-        f"^LH0,0\n"
-        f"^FO0,{title_y}^A0N,{title_h},{title_h}^FB{pw},1,0,C^FD{nivel_text}^FS\n"
-        f"^FO{qr_x},{qr_y}^BQN,2,{qr_mag}^FDMA,{code}^FS\n"
-        f"^FO0,{code_y}^A0N,{code_h},{code_h}^FB{pw},1,0,C^FD{code}^FS\n"
-        f"^XZ\n"
+    code_text = str(code or "")
+    _, title_th, _, _ = _text_bbox(draw, nivel_text, title_font)
+    _, code_th, _, _ = _text_bbox(draw, code_text, code_font)
+    # Negrita suma ~1 px de tinta visual.
+    title_th += 1
+    code_th += 1
+
+    qr_size = min(
+        cell_w - 2 * pad,
+        cell_h - 2 * pad - title_th - code_th - 2 * gap,
     )
+    qr_size = max(96, qr_size)
+
+    # Bloque real (bbox texto + gaps iguales + QR) centrado en la celda.
+    block_h = title_th + gap + qr_size + gap + code_th
+    y0 = max(pad, (cell_h - block_h) // 2)
+    cx = cell_w // 2
+
+    _draw_text_top_centered(draw, cx, y0, nivel_text, title_font, bold=True)
+
+    qr = qrcode.QRCode(
+        version=None,
+        error_correction=qrcode.constants.ERROR_CORRECT_M,
+        box_size=8,
+        border=1,
+    )
+    qr.add_data(code_text)
+    qr.make(fit=True)
+    qr_img = qr.make_image(fill_color="black", back_color="white").convert("L")
+    qr_img = qr_img.resize((qr_size, qr_size), Image.Resampling.NEAREST)
+    qr_x = cx - qr_size // 2
+    qr_y = y0 + title_th + gap
+    img.paste(qr_img, (qr_x, qr_y))
+
+    code_top = qr_y + qr_size + gap
+    _draw_text_top_centered(draw, cx, code_top, code_text, code_font, bold=True)
+
+    return img.convert("1")
+
+def _bitmap_to_zpl_gfa(img: Image.Image, *, x: int, y: int) -> str:
+    """PIL 1-bit → ^GFA (ASCII hex). Negro = bit 1."""
+    if img.mode != "1":
+        img = img.convert("1")
+    width, height = img.size
+    row_bytes = (width + 7) // 8
+    pixels = img.load()
+    raw = bytearray()
+    for row in range(height):
+        for byte_i in range(row_bytes):
+            byte_val = 0
+            for bit in range(8):
+                px = byte_i * 8 + bit
+                if px >= width:
+                    continue
+                # mode 1: 0 = negro
+                if pixels[px, row] == 0:
+                    byte_val |= 0x80 >> bit
+            raw.append(byte_val)
+    total = len(raw)
+    hex_data = raw.hex().upper()
+    return f"^FO{x},{y}^GFA,{total},{total},{row_bytes},{hex_data}^FS\n"
+
+
+def _position_cell_zpl(
+    code: str,
+    level: str,
+    *,
+    cell_x: int,
+    cell_y: int,
+    cell_w: int,
+    cell_h: int,
+) -> str:
+    """Celda en dots del owner: bitmap alineado (no ^A0/^BQ aproximados)."""
+    bitmap = _render_position_cell_bitmap(code, level, cell_w, cell_h)
+    return _bitmap_to_zpl_gfa(bitmap, x=cell_x, y=cell_y)
 
 
 def generate_position_tag_zpl(position):
     """
-    ZPL de posición según medida/DPI del owner (Configuración del propietario).
-    Landscape (p. ej. 4×2): texto izq. + QR der.
-    Portrait: NIVEL → QR → código centrados.
+    Una posición: primera celda (izq. / arriba); resto de la etiqueta en blanco.
+    Grid según medida del owner (paso 2").
     """
-    from apps.workspaces.utils.label_geometry import label_geometry
+    from apps.workspaces.utils.label_geometry import label_geometry, position_label_grid
 
+    ws = _workspace_for_position(position)
     code = _zpl_safe(getattr(position, "code", None))
     level = _zpl_safe(getattr(position, "level", None))
-    geo = label_geometry(_workspace_for_position(position))
-    if geo["landscape"]:
-        return _position_zpl_landscape(code, level, geo)
-    return _position_zpl_portrait(code, level, geo)
+    geo = label_geometry(ws)
+    grid = position_label_grid(ws)
+    pw, ll = int(geo["pw"]), int(geo["ll"])
+    cell_w = pw // grid["cols"]
+    cell_h = ll // grid["rows"]
+    body = _position_cell_zpl(
+        code,
+        level,
+        cell_x=0,
+        cell_y=0,
+        cell_w=cell_w,
+        cell_h=cell_h,
+    )
+    return f"^XA\n^PW{pw}\n^LL{ll}\n^LH0,0\n{body}^XZ\n"
 
 
 def generate_position_multi_tag_zpl(positions) -> str:
     """
-    Una etiqueta física con varias posiciones distintas (escala por owner).
-    1 → layout actual; 2–3 en fila; 4 en rejilla 2×2.
+    Etiqueta física del owner: rejilla cols×rows (paso 2" según medida).
+    Celdas vacías si hay menos posiciones que el máximo.
     """
-    from apps.workspaces.utils.label_geometry import label_geometry, scale_dot
+    from apps.workspaces.utils.label_geometry import label_geometry, position_label_grid
 
-    items = list(positions)[:4]
-    if not items:
+    raw = list(positions)
+    if not raw:
         return ""
-    if len(items) == 1:
-        return generate_position_tag_zpl(items[0])
 
-    geo = label_geometry(_workspace_for_position(items[0]))
-    sx, sy = geo["sx"], geo["sy"]
-    pw, ll = geo["pw"], geo["ll"]
-    n = len(items)
+    ws = _workspace_for_position(raw[0])
+    geo = label_geometry(ws)
+    grid = position_label_grid(ws)
+    cols, rows = grid["cols"], grid["rows"]
+    max_n = grid["max_per_label"]
+    items = raw[:max_n]
+    pw, ll = int(geo["pw"]), int(geo["ll"])
+    cell_w, cell_h = pw // cols, ll // rows
     blocks: list[str] = []
 
-    if n <= 3:
-        cell_w = pw // n
-        qr_mag = max(2, scale_dot(5 if n == 2 else 4, min(sx, sy)))
-        for i, pos in enumerate(items):
-            code = _zpl_safe(getattr(pos, "code", None))
-            level = _zpl_safe(getattr(pos, "level", None))
-            x = i * cell_w
-            qr_x = x + max(scale_dot(8, sx), (cell_w - (qr_mag * 25)) // 2)
-            blocks.append(
-                f"^FO{x + scale_dot(8, sx)},{scale_dot(18, sy)}"
-                f"^A0N,{scale_dot(28, sy)},{scale_dot(28, sx)}^FDNIVEL {level}^FS\n"
-                f"^FO{x + scale_dot(8, sx)},{scale_dot(56, sy)}"
-                f"^A0N,{scale_dot(22, sy)},{scale_dot(22, sx)}^FD{code}^FS\n"
-                f"^FO{qr_x},{scale_dot(100, sy)}^BQN,2,{qr_mag}^FDMA,{code}^FS"
+    for i, pos in enumerate(items):
+        code = _zpl_safe(getattr(pos, "code", None))
+        level = _zpl_safe(getattr(pos, "level", None))
+        col, row = i % cols, i // cols
+        blocks.append(
+            _position_cell_zpl(
+                code,
+                level,
+                cell_x=col * cell_w,
+                cell_y=row * cell_h,
+                cell_w=cell_w,
+                cell_h=cell_h,
             )
-    else:
-        cell_w, cell_h = pw // 2, ll // 2
-        qr_mag = max(2, scale_dot(4, min(sx, sy)))
-        for i, pos in enumerate(items):
-            code = _zpl_safe(getattr(pos, "code", None))
-            level = _zpl_safe(getattr(pos, "level", None))
-            col, row = i % 2, i // 2
-            x, y = col * cell_w, row * cell_h
-            qr_x = x + max(scale_dot(8, sx), (cell_w - (qr_mag * 25)) // 2)
-            blocks.append(
-                f"^FO{x + scale_dot(8, sx)},{y + scale_dot(10, sy)}"
-                f"^A0N,{scale_dot(24, sy)},{scale_dot(24, sx)}^FDNIVEL {level}^FS\n"
-                f"^FO{x + scale_dot(8, sx)},{y + scale_dot(40, sy)}"
-                f"^A0N,{scale_dot(20, sy)},{scale_dot(20, sx)}^FD{code}^FS\n"
-                f"^FO{qr_x},{y + scale_dot(70, sy)}^BQN,2,{qr_mag}^FDMA,{code}^FS"
-            )
+        )
 
-    body = "\n".join(blocks)
-    return f"^XA\n^PW{pw}\n^LL{ll}\n^LH0,0\n{body}\n^XZ\n"
+    return f"^XA\n^PW{pw}\n^LL{ll}\n^LH0,0\n{''.join(blocks)}^XZ\n"

@@ -11,7 +11,7 @@ from apps.common.utils.zebra import (
     USER_PRINT_FAILED,
     USER_PRINTER_NOT_CONFIGURED,
     printer_is_configured,
-    print_to_zebra,
+    print_zpl_sheets,
 )
 from apps.core import choices
 from apps.inventory import models as inventory_models
@@ -76,7 +76,7 @@ def run_bin_print(job: BulkOperationJob) -> dict[str, Any]:
         raise RuntimeError("Ningún bin tiene etiqueta para imprimir.")
     if not printer_is_configured(job.workspace):
         raise RuntimeError(USER_PRINTER_NOT_CONFIGURED)
-    if not print_to_zebra("\n".join(zpl_jobs), workspace=job.workspace):
+    if not print_zpl_sheets(zpl_jobs, workspace=job.workspace):
         raise RuntimeError(USER_PRINT_FAILED)
     parts = [f"Se enviaron {len(zpl_jobs)} etiquetas."]
     if skipped:

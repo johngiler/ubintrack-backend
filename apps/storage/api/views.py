@@ -905,11 +905,12 @@ class PositionViewSet(WorkspaceScopeMixin, viewsets.ModelViewSet):
     def bulk_print(self, request):
         """Imprime etiquetas ZPL de posiciones (async si hay más de una).
 
-        `per_label` (1–4): cuántas posiciones distintas van en cada etiqueta 4×2.
-        La última etiqueta puede quedar incompleta.
+        `per_label`: posiciones por etiqueta física; tope = grid del owner
+        (paso 2": cols=⌊ancho/2⌋, rows=⌊alto/2⌋).
         """
         from apps.common.models import BulkOperationJob
         from apps.storage.services_bulk import run_position_print
+        from apps.workspaces.utils.label_geometry import max_positions_per_label
 
         ws = get_workspace_for_request(request)
         if not printer_is_configured(ws):
@@ -918,12 +919,22 @@ class PositionViewSet(WorkspaceScopeMixin, viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        raw = request.data.get("per_label", 1)
+        max_per = max_positions_per_label(ws)
+        raw = request.data.get("per_label", max_per)
         try:
             per_label = int(raw)
         except (TypeError, ValueError):
-            per_label = 1
-        per_label = max(1, min(per_label, 4))
+            per_label = max_per
+        if per_label < 1 or per_label > max_per:
+            return Response(
+                {
+                    "detail": (
+                        f"Por etiqueta admite entre 1 y {max_per} "
+                        "según la medida configurada."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         same_copies = self._optional_bool(request.data, "same_position_copies")
         if same_copies is None:
             same_copies = False

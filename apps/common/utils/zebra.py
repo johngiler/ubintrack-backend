@@ -1,5 +1,6 @@
 import logging
 import socket
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -38,12 +39,14 @@ def resolve_printer_endpoint(workspace) -> tuple[str, int] | None:
     return host, port
 
 
+def _timeout_for_payload(nbytes: int) -> float:
+    # Gráficos GFA son pesados; 5s no alcanza con varias hojas.
+    return min(90.0, max(20.0, 15.0 + nbytes / 8000.0))
+
+
 def print_to_zebra(zpl_data, *, workspace=None):
     """
-    Envía ZPL a la impresora de red del owner.
-
-    Requiere workspace con impresora configurada (IP + puerto + ZPL).
-    No usa variables de entorno globales.
+    Envía un job ZPL (una etiqueta física) a la impresora del owner.
     """
     if not zpl_data:
         return False
@@ -57,19 +60,22 @@ def print_to_zebra(zpl_data, *, workspace=None):
         return False
 
     printer_ip, printer_port = endpoint
+    payload = zpl_data.encode("utf-8") if isinstance(zpl_data, str) else zpl_data
+    timeout = _timeout_for_payload(len(payload))
 
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(5)
+        sock.settimeout(timeout)
         sock.connect((printer_ip, printer_port))
-        sock.send(zpl_data.encode("utf-8"))
+        sock.sendall(payload)
         sock.close()
         return True
     except socket.timeout:
         logger.error(
-            "Error: Timeout al conectar con la impresora %s:%s",
+            "Error: Timeout al conectar/enviar a la impresora %s:%s (%s bytes)",
             printer_ip,
             printer_port,
+            len(payload),
         )
         return False
     except ConnectionRefusedError:
@@ -82,3 +88,28 @@ def print_to_zebra(zpl_data, *, workspace=None):
     except Exception as e:
         logger.error("Error al imprimir: %s", e)
         return False
+
+
+def print_zpl_sheets(sheets, *, workspace=None, pause_s: float = 0.35) -> bool:
+    """
+    Envía cada etiqueta física en su propia conexión.
+    Evita saturar el buffer al unir varios ^GFA grandes.
+    """
+    jobs = [s for s in (sheets or []) if s]
+    if not jobs:
+        return False
+    if not printer_is_configured(workspace):
+        return False
+
+    for index, sheet in enumerate(jobs):
+        if not print_to_zebra(sheet, workspace=workspace):
+            logger.error(
+                "Falló la hoja %s/%s al imprimir (workspace_id=%s)",
+                index + 1,
+                len(jobs),
+                getattr(workspace, "pk", None),
+            )
+            return False
+        if index + 1 < len(jobs) and pause_s > 0:
+            time.sleep(pause_s)
+    return True
