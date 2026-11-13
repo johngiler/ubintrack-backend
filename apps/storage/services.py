@@ -304,7 +304,10 @@ def _render_position_cell_bitmap(code: str, level: str, cell_w: int, cell_h: int
 
 
 def _center_bitmap_ink(img: Image.Image) -> Image.Image:
-    """Centra el contenido negro en el alto (y ancho) de la celda."""
+    """
+    Centra tinta en X. En Y: un poco bajo el centro geométrico
+    (reparte el margen libre ~40% arriba / 60% abajo) sin achicar el arte.
+    """
     if img.mode != "1":
         img = img.convert("1")
     width, height = img.size
@@ -333,9 +336,10 @@ def _center_bitmap_ink(img: Image.Image) -> Image.Image:
         return img
 
     band_h = bottom - top + 1
-    band_w = right - left + 1
-    new_top = max(0, (height - band_h) // 2)
-    new_left = max(0, (width - band_w) // 2)
+    free_y = max(0, height - band_h)
+    # Más margen arriba que abajo → el bloque baja sin reducir QR/textos.
+    new_top = int(free_y * 0.62) if free_y else 0
+    new_left = max(0, (width - (right - left + 1)) // 2)
 
     cropped = img.crop((left, top, right + 1, bottom + 1))
     out = Image.new("1", (width, height), 1)
@@ -376,7 +380,7 @@ def _position_cell_zpl(
     cell_w: int,
     cell_h: int,
 ) -> str:
-    """Celda en dots del owner: bitmap alineado (no ^A0/^BQ aproximados)."""
+    """Celda a tamaño completo; posición vertical solo mueve el bloque, no lo escala."""
     bitmap = _render_position_cell_bitmap(code, level, cell_w, cell_h)
     return _bitmap_to_zpl_gfa(bitmap, x=cell_x, y=cell_y)
 
