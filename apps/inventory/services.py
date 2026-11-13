@@ -31,8 +31,398 @@ def _workspace_for_bin(bin_instance):
     return load_workspace_for_label(workspace_id=ws_id)
 
 
+def _bin_label_layout(width: int, height: int) -> dict:
+    """
+    Layout 1×1: campos a la izquierda, QR grande arriba-derecha.
+    QR ~ alto útil (mismo orden que posiciones); aire bajo el título.
+    """
+    width = max(200, int(width))
+    height = max(100, int(height))
+    pad = max(12, int(min(width, height) * 0.04))
+    # 4×2 @ 203 → ~320–340 dots; fidelidad 1:1 vía bitmap/^GFA.
+    qr_size = max(
+        96,
+        min(height - 2 * pad, int(height * 0.82), int(width * 0.42)),
+    )
+    title_size = max(28, min(64, int(height * 0.13)))
+    field_size = max(14, min(28, int(height * 0.055)))
+    title_gap = max(field_size, int(height * 0.045))
+    text_col_w = max(80, width - qr_size - pad * 3)
+    return {
+        "width": width,
+        "height": height,
+        "pad": pad,
+        "qr_size": qr_size,
+        "qr_x": width - qr_size - pad,
+        "qr_y": pad,
+        "title_size": title_size,
+        "field_size": field_size,
+        "title_gap": title_gap,
+        "text_col_w": text_col_w,
+        "left": pad,
+    }
+
+
+def _bin_label_font(size: int):
+    size = max(10, int(size))
+    candidates = [
+        os.path.join(settings.BASE_DIR, "arial.ttf"),
+        os.path.join(settings.BASE_DIR, "Arial.ttf"),
+        "/System/Library/Fonts/Supplemental/Arial.ttf",
+        "/Library/Fonts/Arial.ttf",
+        "Arial",
+        "DejaVuSans",
+    ]
+    for path in candidates:
+        try:
+            return ImageFont.truetype(path, size)
+        except OSError:
+            continue
+    return ImageFont.load_default()
+
+
+def _text_pixel_width(draw, text: str, font) -> int:
+    try:
+        bbox = draw.textbbox((0, 0), text, font=font)
+        return bbox[2] - bbox[0]
+    except AttributeError:
+        return int(draw.textlength(text, font=font))
+
+
+def _clip_to_width(text: str, font, draw, max_width: int) -> str:
+    """Trunca con … para que el texto no invada el QR."""
+    text = str(text or "-")
+    if max_width <= 0:
+        return text
+
+    if _text_pixel_width(draw, text, font) <= max_width:
+        return text
+    ell = "..."
+    if _text_pixel_width(draw, ell, font) >= max_width:
+        return ell
+    lo, hi = 0, len(text)
+    while lo < hi:
+        mid = (lo + hi + 1) // 2
+        if _text_pixel_width(draw, text[:mid] + ell, font) <= max_width:
+            lo = mid
+        else:
+            hi = mid - 1
+    return text[:lo] + ell if lo else ell
+
+
+def _wrap_to_lines(text: str, font, draw, max_width: int, *, max_lines: int = 2) -> list[str]:
+    """Parte el texto en hasta max_lines; la última lleva … si no cabe todo."""
+    text = " ".join(str(text or "").split())
+    if not text or max_width <= 0 or max_lines < 1:
+        return []
+
+    words = text.split(" ")
+    lines: list[str] = []
+    idx = 0
+    while idx < len(words) and len(lines) < max_lines:
+        is_last = len(lines) == max_lines - 1
+        line = words[idx]
+        idx += 1
+        while idx < len(words):
+            trial = f"{line} {words[idx]}"
+            if _text_pixel_width(draw, trial, font) <= max_width:
+                line = trial
+                idx += 1
+            else:
+                break
+        if is_last and idx < len(words):
+            line = _clip_to_width(f"{line} {' '.join(words[idx:])}", font, draw, max_width)
+            idx = len(words)
+        lines.append(line)
+    return lines
+
+
+def _bin_label_value_present(value) -> bool:
+    """True si el valor aporta información (no vacío ni guión solo)."""
+    text = str(value or "").strip()
+    return bool(text) and text != "-"
+
+
+def _bin_label_observation_text(value: str) -> str:
+    """Observación normalizada (espacios); el render parte hasta 2 líneas."""
+    return " ".join(str(value or "").split())
+
+
+def _bin_label_field_rows(bin_instance, workspace) -> list[tuple[str, str, str | None]]:
+    """
+    Filas de la etiqueta: solo campos con valor.
+    Observación solo si el bin tiene label_include_observation.
+    """
+    rows: list[tuple[str, str, str | None]] = []
+
+    company_name = (workspace_display_name(workspace) or "").upper().strip()
+    if _bin_label_value_present(company_name):
+        rows.append(("title", company_name, None))
+
+    client = bin_instance.client.name if bin_instance.client else ""
+    if _bin_label_value_present(client):
+        rows.append(("field", "CLIENTE", client))
+
+    position = ""
+    if getattr(bin_instance, "position", None):
+        position = bin_instance.position.code or ""
+    if _bin_label_value_present(position):
+        rows.append(("field", "POSICIÓN", position))
+
+    bin_code = bin_instance.code or ""
+    if _bin_label_value_present(bin_code):
+        rows.append(("field", "BIN", bin_code))
+
+    lpn = getattr(bin_instance, "lpn", None) or ""
+    if _bin_label_value_present(lpn):
+        rows.append(("field", "LPN", lpn))
+
+    barcode = getattr(bin_instance, "barcode", None) or ""
+    if _bin_label_value_present(barcode):
+        rows.append(("field", "CÓDIGO DE BARRA", barcode))
+
+    product_name = ""
+    sku = ""
+    lote = ""
+    cantidad = ""
+    exp = ""
+    if isinstance(bin_instance, models.Bin):
+        if hasattr(bin_instance, "bin_products") and bin_instance.bin_products.exists():
+            bin_product = bin_instance.bin_products.first()
+            product = bin_product.entry_product.product
+            product_name = product.name or ""
+            sku = product.client_sku or ""
+            lote = bin_product.batch or bin_product.entry_product.batch or ""
+            qty = bin_product.quantity
+            uom = getattr(product, "uom", None) or ""
+            if qty is not None and str(qty).strip() != "":
+                cantidad = f"{qty} {uom}".strip()
+            if bin_product.expiration_date:
+                exp = bin_product.expiration_date.strftime("%Y-%m-%d")
+            elif bin_product.entry_product.expiration_date:
+                exp = bin_product.entry_product.expiration_date.strftime("%Y-%m-%d")
+
+    for label, value in (
+        ("PRODUCTO", product_name),
+        ("SKU", sku),
+        ("LOTE", lote),
+        ("CANTIDAD", cantidad),
+        ("EXPIRACIÓN", exp),
+    ):
+        if _bin_label_value_present(value):
+            rows.append(("field", label, value))
+
+    include_obs = bool(getattr(bin_instance, "label_include_observation", False))
+    if include_obs:
+        observation = _bin_label_observation_text(
+            getattr(bin_instance, "observation", None) or ""
+        )
+        if _bin_label_value_present(observation):
+            rows.append(("field", "OBSERVACIÓN", observation))
+
+    return rows
+
+
+def _render_bin_label_bitmap(bin_instance, width: int, height: int) -> Image.Image:
+    """
+    Arte 1×1 en dots/px (preview e impresión comparten este layout).
+    Título + campos izq.; QR grande arriba-derecha.
+    """
+    workspace = _workspace_for_bin(bin_instance)
+    layout = _bin_label_layout(width, height)
+    pad = layout["pad"]
+    qr_size = layout["qr_size"]
+    title_size = layout["title_size"]
+    field_size = layout["field_size"]
+    title_gap = layout["title_gap"]
+    text_col_w = layout["text_col_w"]
+    left = layout["left"]
+    line_gap = max(2, int(field_size * 0.2))
+
+    # Observación un poco más chica que el resto de campos.
+    obs_size = max(11, int(field_size * 0.82))
+    obs_font = _bin_label_font(obs_size)
+    obs_line_gap = max(2, int(obs_size * 0.2))
+    # Separación superior respecto al QR / campos de arriba.
+    obs_top_gap = max(obs_line_gap * 3, int(field_size * 0.7))
+
+    rows_preview = _bin_label_field_rows(bin_instance, workspace)
+    will_draw_obs = any(r[0] == "field" and r[1] == "OBSERVACIÓN" for r in rows_preview)
+    # Franja inferior = exactamente 2 líneas de observación (+ aire), sin vacío extra.
+    obs_band_top = None
+    if will_draw_obs:
+        obs_block_h = obs_size * 2 + obs_line_gap
+        obs_band_h = obs_block_h + obs_top_gap
+        obs_band_top = layout["height"] - pad - obs_band_h
+        max_qr = max(96, obs_band_top - layout["qr_y"])
+        qr_size = min(qr_size, max_qr)
+        text_col_w = max(80, layout["width"] - qr_size - pad * 3)
+        layout = {
+            **layout,
+            "qr_size": qr_size,
+            "qr_x": layout["width"] - qr_size - pad,
+            "text_col_w": text_col_w,
+        }
+
+    img = Image.new("RGB", (layout["width"], layout["height"]), (255, 255, 255))
+    draw = ImageDraw.Draw(img)
+    title_font = _bin_label_font(title_size)
+    text_font = _bin_label_font(field_size)
+
+    def draw_bold(x, y, text, font):
+        for dx, dy in ((0, 0), (1, 0), (0, 1), (1, 1)):
+            draw.text((x + dx, y + dy), text, font=font, fill="black")
+
+    def draw_labeled(x, y, label, value, font, max_w):
+        prefix = f"{label}:"
+        prefix_w = _text_pixel_width(draw, prefix, font) + 8
+        value = _clip_to_width(value, font, draw, max(20, max_w - prefix_w))
+        draw_bold(x, y, prefix, font)
+        draw.text((x + prefix_w, y), value, font=font, fill="black")
+        return field_size
+
+    def draw_observation(x, y, value, font, max_w, *, size: int, gap: int):
+        """
+        Ancho completo (hueco bajo el QR):
+        L1 = OBSERVACIÓN: + texto; L2 = resto a todo el ancho con ….
+        """
+        label = "OBSERVACIÓN:"
+        label_w = _text_pixel_width(draw, label, font) + 8
+        first_w = max(20, max_w - label_w)
+        draw_bold(x, y, label, font)
+
+        words = value.split(" ")
+        line1_parts: list[str] = []
+        idx = 0
+        while idx < len(words):
+            trial = " ".join(line1_parts + [words[idx]])
+            if _text_pixel_width(draw, trial, font) <= first_w:
+                line1_parts.append(words[idx])
+                idx += 1
+            else:
+                break
+        line1 = " ".join(line1_parts)
+        if line1:
+            draw.text((x + label_w, y), line1, font=font, fill="black")
+
+        rest = " ".join(words[idx:])
+        if rest:
+            line2 = _wrap_to_lines(rest, font, draw, max_w, max_lines=1)
+            if line2:
+                draw.text((x, y + size + gap), line2[0], font=font, fill="black")
+        elif not line1 and words:
+            wrapped = _wrap_to_lines(value, font, draw, max_w, max_lines=2)
+            for li, line in enumerate(wrapped):
+                draw.text(
+                    (x, y + (size + gap) * (li + 1)),
+                    line,
+                    font=font,
+                    fill="black",
+                )
+
+    rows = rows_preview
+    title_row = next((r for r in rows if r[0] == "title"), None)
+    field_rows = [r for r in rows if r[0] == "field"]
+    obs_row = next((r for r in field_rows if r[1] == "OBSERVACIÓN"), None)
+    other_rows = [r for r in field_rows if r[1] != "OBSERVACIÓN"]
+
+    # Título arriba (si hay); aire extra debajo.
+    if title_row:
+        title_text = _clip_to_width(title_row[1], title_font, draw, text_col_w)
+        draw_bold(left, pad, title_text, title_font)
+        fields_top = pad + title_size + title_gap
+    else:
+        fields_top = pad
+
+    qr_bottom = layout["qr_y"] + qr_size
+    full_text_w = layout["width"] - 2 * pad
+    # Campos solo al costado del QR; la franja inferior es de observación.
+    if obs_row and obs_band_top is not None:
+        other_bottom = max(fields_top + field_size, min(qr_bottom, obs_band_top))
+    else:
+        other_bottom = layout["height"] - pad
+
+    usable = max(1, other_bottom - fields_top)
+    if other_rows:
+        step = usable / len(other_rows)
+        for index, row in enumerate(other_rows):
+            y_pos = int(fields_top + index * step + max(0, (step - field_size) / 2))
+            draw_labeled(left, y_pos, row[1], row[2], text_font, text_col_w)
+
+    qr = qrcode.QRCode(
+        version=None,
+        error_correction=qrcode.constants.ERROR_CORRECT_M,
+        box_size=8,
+        border=1,
+    )
+    qr.add_data(bin_instance.code or "")
+    qr.make(fit=True)
+    qr_image = qr.make_image(fill_color="black", back_color="white").convert("RGB")
+    qr_image = qr_image.resize((qr_size, qr_size), Image.Resampling.NEAREST)
+    # Recortar margen blanco inferior del QR para no dejar “hueco falso”.
+    qr_gray = qr_image.convert("L")
+    qr_w, qr_h = qr_gray.size
+    qr_px = qr_gray.load()
+    ink_bottom = 0
+    for yy in range(qr_h - 1, -1, -1):
+        if any(qr_px[xx, yy] < 250 for xx in range(qr_w)):
+            ink_bottom = yy
+            break
+    trim = max(0, qr_h - ink_bottom - 1 - max(2, qr_h // 40))
+    if trim > 0:
+        qr_image = qr_image.crop((0, 0, qr_w, qr_h - trim))
+    img.paste(qr_image, (layout["qr_x"], layout["qr_y"]))
+    qr_content_bottom = layout["qr_y"] + qr_image.size[1]
+
+    if obs_row:
+        # Anclar al borde inferior (sin vacío muerto abajo).
+        # El aire bajo el QR / EXPIRACIÓN es la separación superior.
+        block_h = obs_size * 2 + obs_line_gap
+        obs_y = layout["height"] - pad - block_h
+        min_obs_y = qr_content_bottom + obs_top_gap
+        if obs_y < min_obs_y:
+            obs_y = min_obs_y
+            max_obs_y = layout["height"] - pad - block_h
+            if obs_y > max_obs_y:
+                obs_y = max_obs_y
+        draw_observation(
+            left,
+            obs_y,
+            obs_row[2],
+            obs_font,
+            full_text_w,
+            size=obs_size,
+            gap=obs_line_gap,
+        )
+
+    return img
+
+
+def _bitmap_to_zpl_gfa(img: Image.Image, *, x: int, y: int) -> str:
+    """PIL 1-bit → ^GFA (ASCII hex). Negro = bit 1. Misma vía que posiciones."""
+    if img.mode != "1":
+        img = img.convert("1")
+    width, height = img.size
+    row_bytes = (width + 7) // 8
+    pixels = img.load()
+    raw = bytearray()
+    for row in range(height):
+        for byte_i in range(row_bytes):
+            byte_val = 0
+            for bit in range(8):
+                px = byte_i * 8 + bit
+                if px >= width:
+                    continue
+                if pixels[px, row] == 0:
+                    byte_val |= 0x80 >> bit
+            raw.append(byte_val)
+    total = len(raw)
+    hex_data = raw.hex().upper()
+    return f"^FO{x},{y}^GFA,{total},{total},{row_bytes},{hex_data}^FS\n"
+
+
 def generate_bin_tag(bin_instance):
-    """Etiqueta de bin (preview): campos + QR; tamaño según medida del owner."""
+    """Etiqueta de bin (preview): mismo layout que ZPL; resolución pantallas."""
     from apps.workspaces.utils.label_geometry import label_geometry, scale_dot
 
     workspace = _workspace_for_bin(bin_instance)
@@ -40,218 +430,26 @@ def generate_bin_tag(bin_instance):
     # Preview baseline 4×2 @ 300 DPI (1200×600); escala con pulgadas del owner.
     tag_width = max(200, scale_dot(1200, geo["sx"]))
     tag_height = max(100, scale_dot(600, geo["sy"]))
-    padding = max(8, scale_dot(18, min(geo["sx"], geo["sy"])))
-    qr_size = max(80, scale_dot(340, min(geo["sx"], geo["sy"])))
-    title_size = max(12, scale_dot(32, min(geo["sx"], geo["sy"])))
-    text_size = max(10, scale_dot(24, min(geo["sx"], geo["sy"])))
-
-    tag = Image.new("RGB", (tag_width, tag_height), (255, 255, 255))
-    draw = ImageDraw.Draw(tag)
-
-    try:
-        font_path = os.path.join(settings.BASE_DIR, "arial.ttf")
-        title_font = ImageFont.truetype(font_path, title_size)
-        text_font = ImageFont.truetype(font_path, text_size)
-    except OSError:
-        try:
-            title_font = ImageFont.truetype("Arial", title_size)
-            text_font = ImageFont.truetype("Arial", text_size)
-        except OSError:
-            logger.error("No se pudo cargar ninguna fuente. Usando la fuente predeterminada.")
-            title_font = ImageFont.load_default()
-            text_font = ImageFont.load_default()
-
-    def clip(text, max_chars):
-        text = str(text or "-")
-        return text if len(text) <= max_chars else text[: max_chars - 3] + "..."
-
-    def draw_bold(x, y, text, font):
-        for dx, dy in ((0, 0), (1, 0), (0, 1), (1, 1)):
-            draw.text((x + dx, y + dy), text, font=font, fill="black")
-
-    def text_width(text, font):
-        try:
-            bbox = draw.textbbox((0, 0), text, font=font)
-            return bbox[2] - bbox[0]
-        except AttributeError:
-            return int(draw.textlength(text, font=font))
-
-    def draw_labeled(x, y, label, value, font):
-        prefix = f"{label}:"
-        draw_bold(x, y, prefix, font)
-        draw.text((x + text_width(prefix, font) + 8, y), value, font=font, fill="black")
-
-    client = clip(bin_instance.client.name if bin_instance.client else "-", 36)
-    position = "-"
-    if hasattr(bin_instance, "position") and bin_instance.position:
-        position = clip(bin_instance.position.code, 36)
-    bin_code = clip(bin_instance.code, 36)
-    company_name = clip(workspace_display_name(workspace), 38).upper()
-
-    product_name = "-"
-    sku = "-"
-    lote = "-"
-    cantidad = "-"
-    exp = "-"
-    if isinstance(bin_instance, models.Bin):
-        if hasattr(bin_instance, "bin_products") and bin_instance.bin_products.exists():
-            bin_product = bin_instance.bin_products.first()
-            product = bin_product.entry_product.product
-            product_name = clip(product.name, 36)
-            sku = clip(product.client_sku or "-", 28)
-            lote = clip(bin_product.batch or bin_product.entry_product.batch or "-", 28)
-            cantidad = clip(f"{bin_product.quantity} {product.uom}", 28)
-            if bin_product.expiration_date:
-                exp = bin_product.expiration_date.strftime("%Y-%m-%d")
-            elif bin_product.entry_product.expiration_date:
-                exp = bin_product.entry_product.expiration_date.strftime("%Y-%m-%d")
-
-    rows = [
-        ("title", company_name, None),
-        ("field", "CLIENTE", client),
-        ("field", "POSICIÓN", position),
-        ("field", "BIN", bin_code),
-        ("field", "PRODUCTO", product_name),
-        ("field", "SKU", sku),
-        ("field", "LOTE", lote),
-        ("field", "CANTIDAD", cantidad),
-        ("field", "EXPIRACIÓN", exp),
-    ]
-    # Reparte título + campos en todo el alto útil.
-    usable_h = tag_height - padding * 2
-    step = usable_h / len(rows)
-    for index, row in enumerate(rows):
-        y_pos = int(padding + index * step + max(0, (step - 30) / 2))
-        if row[0] == "title":
-            draw_bold(padding, y_pos, row[1], title_font)
-        else:
-            draw_labeled(padding, y_pos, row[1], row[2], text_font)
-
-    qr = qrcode.QRCode(
-        version=1,
-        error_correction=qrcode.constants.ERROR_CORRECT_M,
-        box_size=6,
-        border=1,
-    )
-    qr.add_data(bin_instance.code or "")
-    qr.make(fit=True)
-    qr_image = qr.make_image(fill_color="black", back_color="white").convert("RGB")
-    qr_image = qr_image.resize((qr_size, qr_size))
-    qr_x = tag_width - qr_size - padding
-    qr_y = (tag_height - qr_size) // 2
-    tag.paste(qr_image, (qr_x, qr_y))
+    tag = _render_bin_label_bitmap(bin_instance, tag_width, tag_height)
 
     relative_path = build_wms_bin_tag_relative(bin_instance)
     tag_path = ensure_media_parent_dir(relative_path)
     tag.save(tag_path, format="WEBP", quality=85, method=6)
-
     return tag_path
 
 
 def generate_bin_tag_zpl(bin_instance):
-    """ZPL de bin: campos + QR; geometría según medida/DPI del owner."""
-    from apps.workspaces.utils.label_geometry import label_geometry, scale_dot
-
-    def truncate_text_zpl(text, max_length=34):
-        text = str(text or "")
-        if len(text) > max_length:
-            return text[: max_length - 3] + "..."
-        return text
-
-    def zpl_safe(text):
-        # Sin tildes: emulación ZPL de escritorio suele ir en ASCII.
-        text = str(text or "")
-        for src, dst in (
-            ("Á", "A"), ("É", "E"), ("Í", "I"), ("Ó", "O"), ("Ú", "U"),
-            ("á", "a"), ("é", "e"), ("í", "i"), ("ó", "o"), ("ú", "u"),
-            ("Ñ", "N"), ("ñ", "n"),
-        ):
-            text = text.replace(src, dst)
-        return text.replace("^", " ").replace("~", " ")
-
-    def zpl_bold_label(x, y, label, value, size=22):
-        prefix = f"{label}:"
-        value_x = x + int(len(prefix) * size * 0.62) + 6
-        return (
-            f"^FO{x},{y}^A0N,{size},{size}^FD{prefix}^FS\n"
-            f"^FO{x + 1},{y}^A0N,{size},{size}^FD{prefix}^FS\n"
-            f"^FO{value_x},{y}^A0N,{size},{size}^FD{value}^FS\n"
-        )
+    """
+    ZPL de bin 1×1: bitmap completo → ^GFA (fidelidad preview/print como posiciones).
+    """
+    from apps.workspaces.utils.label_geometry import label_geometry
 
     workspace = _workspace_for_bin(bin_instance)
     geo = label_geometry(workspace)
-    sx, sy = geo["sx"], geo["sy"]
-    pw, ll = geo["pw"], geo["ll"]
-    scale = min(sx, sy)
-
-    client = bin_instance.client.name if bin_instance.client else "-"
-    position = bin_instance.position.code if bin_instance.position else "-"
-    bin_code = bin_instance.code or "-"
-    company_name = truncate_text_zpl(
-        zpl_safe(workspace_display_name(workspace)).upper(),
-        34,
-    )
-    client = truncate_text_zpl(zpl_safe(client), 34)
-    position = truncate_text_zpl(zpl_safe(position), 34)
-    bin_code = zpl_safe(bin_code)
-
-    product_name = "-"
-    sku = "-"
-    lote = "-"
-    cantidad = "-"
-    exp = "-"
-    if isinstance(bin_instance, models.Bin):
-        if hasattr(bin_instance, "bin_products") and bin_instance.bin_products.exists():
-            bin_product = bin_instance.bin_products.first()
-            product = bin_product.entry_product.product
-            product_name = truncate_text_zpl(zpl_safe(product.name), 34)
-            sku = truncate_text_zpl(zpl_safe(product.client_sku or "-"), 28)
-            lote = truncate_text_zpl(
-                zpl_safe(bin_product.batch or bin_product.entry_product.batch or "-"),
-                28,
-            )
-            cantidad = truncate_text_zpl(
-                zpl_safe(f"{bin_product.quantity} {product.uom}"),
-                28,
-            )
-            if bin_product.expiration_date:
-                exp = bin_product.expiration_date.strftime("%Y-%m-%d")
-            elif bin_product.entry_product.expiration_date:
-                exp = bin_product.entry_product.expiration_date.strftime("%Y-%m-%d")
-
-    rows = [
-        ("title", company_name, None),
-        ("field", "CLIENTE", client),
-        ("field", "POSICION", position),
-        ("field", "BIN", bin_code),
-        ("field", "PRODUCTO", product_name),
-        ("field", "SKU", sku),
-        ("field", "LOTE", lote),
-        ("field", "CANTIDAD", cantidad),
-        ("field", "EXPIRACION", exp),
-    ]
-    top = scale_dot(14, sy)
-    usable = max(1, ll - top * 2)
-    step = usable / len(rows)
-    field_size = max(10, scale_dot(22, scale))
-    title_size = max(12, scale_dot(28, scale))
-    left = scale_dot(14, sx)
-    lines = []
-    for index, row in enumerate(rows):
-        y = int(top + index * step + max(0, (step - field_size) / 2))
-        if row[0] == "title":
-            lines.append(
-                f"^FO{left},{y}^A0N,{title_size},{title_size}^FD{row[1]}^FS\n"
-                f"^FO{left + 1},{y}^A0N,{title_size},{title_size}^FD{row[1]}^FS\n"
-            )
-        else:
-            lines.append(zpl_bold_label(left, y, row[1], row[2], size=field_size))
-
-    qr_mag = max(2, scale_dot(6, scale))
-    lines.append(
-        f"^FO{scale_dot(520, sx)},{scale_dot(50, sy)}^BQN,2,{qr_mag}^FDMA,{bin_code}^FS\n"
-    )
-    return f"^XA\n^PW{pw}\n^LL{ll}\n^LH0,0\n" + "".join(lines) + "^XZ\n"
+    pw, ll = int(geo["pw"]), int(geo["ll"])
+    bitmap = _render_bin_label_bitmap(bin_instance, pw, ll)
+    body = _bitmap_to_zpl_gfa(bitmap.convert("1"), x=0, y=0)
+    return f"^XA\n^PW{pw}\n^LL{ll}\n^LH0,0\n{body}^XZ\n"
 
 
 def export_bin_entries_excel(bins_queryset):

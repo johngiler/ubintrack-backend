@@ -17,6 +17,8 @@ staticfiles/
 data/**
 !data/db/
 !data/db/**
+data/db/*.sql
+!data/db/.gitkeep
 !data/imports/
 !data/imports/**
 data/imports/**/*_report.json

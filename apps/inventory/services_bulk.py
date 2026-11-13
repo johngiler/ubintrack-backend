@@ -74,9 +74,13 @@ def run_bin_print(job: BulkOperationJob) -> dict[str, Any]:
             skipped.append(bin_obj.code)
     if not zpl_jobs:
         raise RuntimeError("Ningún bin tiene etiqueta para imprimir.")
-    if not printer_is_configured(job.workspace):
+    # Workspace fresco (IP/puerto); evita instancia stale en el worker.
+    from apps.workspaces.utils.label_geometry import load_workspace_for_label
+
+    workspace = load_workspace_for_label(workspace_id=job.workspace_id) or job.workspace
+    if not printer_is_configured(workspace):
         raise RuntimeError(USER_PRINTER_NOT_CONFIGURED)
-    if not print_zpl_sheets(zpl_jobs, workspace=job.workspace):
+    if not print_zpl_sheets(zpl_jobs, workspace=workspace):
         raise RuntimeError(USER_PRINT_FAILED)
     parts = [f"Se enviaron {len(zpl_jobs)} etiquetas."]
     if skipped:

@@ -181,6 +181,11 @@ class Bin(BaseModel):
         default="",
         verbose_name="observación",
     )
+    label_include_observation = models.BooleanField(
+        default=False,
+        verbose_name="incluir observación en etiqueta",
+        help_text="Si está activo, la observación aparece en preview y ZPL (hasta dos líneas).",
+    )
 
     class Meta:
         verbose_name = 'bin'
@@ -202,6 +207,10 @@ class Bin(BaseModel):
             "code",
             "entry",
             "entry_id",
+            "lpn",
+            "barcode",
+            "observation",
+            "label_include_observation",
         }
     )
 
