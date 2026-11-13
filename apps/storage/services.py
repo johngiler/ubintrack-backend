@@ -246,15 +246,22 @@ def _render_position_cell_bitmap(code: str, level: str, cell_w: int, cell_h: int
     """
     Arte en dots (1 px = 1 dot @ DPI del owner).
     4×2" → celdas 2×2"; título/QR/código con el mismo gap y el mismo eje X.
+    Tipografía a escala de la celda completa; el QR cabe entre márgenes para
+    dejar el bloque en el medio (sin el shrink agresivo del top-reserve).
     """
     cell_w = max(64, int(cell_w))
     cell_h = max(64, int(cell_h))
     img = Image.new("L", (cell_w, cell_h), 255)
     draw = ImageDraw.Draw(img)
 
-    # Márgenes ~5% de la celda 2×2 @ 203 DPI (406 dots → ~20).
+    # Aire horizontal; vertical lo marcan margin_top / margin_bottom.
     pad = max(12, int(min(cell_w, cell_h) * 0.05))
     gap = max(10, int(min(cell_w, cell_h) * 0.035))  # mismo aire arriba y abajo del QR
+
+    # Margen para bajar el bloque al medio en papel sin el shrink del top-reserve.
+    # Tipografía a escala full; solo el QR cede un poco vs el máximo absoluto.
+    margin_top = max(pad, int(cell_h * 0.12))
+    margin_bottom = max(pad, int(cell_h * 0.06))
 
     title_size = max(28, min(58, int(cell_h * 0.11)))
     code_size = max(22, min(46, int(cell_h * 0.09)))
@@ -271,13 +278,14 @@ def _render_position_cell_bitmap(code: str, level: str, cell_w: int, cell_h: int
 
     qr_size = min(
         cell_w - 2 * pad,
-        cell_h - 2 * pad - title_th - code_th - 2 * gap,
+        cell_h - margin_top - margin_bottom - title_th - code_th - 2 * gap,
     )
     qr_size = max(96, qr_size)
 
-    # Bloque real (bbox texto + gaps iguales + QR) centrado en la celda.
     block_h = title_th + gap + qr_size + gap + code_th
-    y0 = max(pad, (cell_h - block_h) // 2)
+    # Si sobra aire, repartir a partes iguales entre los dos márgenes.
+    free_extra = max(0, cell_h - margin_top - margin_bottom - block_h)
+    y0 = margin_top + free_extra // 2
     cx = cell_w // 2
 
     _draw_text_top_centered(draw, cx, y0, nivel_text, title_font, bold=True)
@@ -299,14 +307,14 @@ def _render_position_cell_bitmap(code: str, level: str, cell_w: int, cell_h: int
     code_top = qr_y + qr_size + gap
     _draw_text_top_centered(draw, cx, code_top, code_text, code_font, bold=True)
 
-    # Recentrar por tinta real (bbox geométrico deja el bloque ópticamente arriba).
+    # Ajuste fino por bbox de tinta real (horizontal + vertical).
     return _center_bitmap_ink(img.convert("1"))
 
 
 def _center_bitmap_ink(img: Image.Image) -> Image.Image:
     """
-    Centra tinta en X. En Y: un poco bajo el centro geométrico
-    (reparte el margen libre ~40% arriba / 60% abajo) sin achicar el arte.
+    Centra tinta en X. En Y coloca el bloque cerca del medio óptico en papel
+    (~15% desde arriba cuando hay margen libre). No escala el arte.
     """
     if img.mode != "1":
         img = img.convert("1")
@@ -337,8 +345,9 @@ def _center_bitmap_ink(img: Image.Image) -> Image.Image:
 
     band_h = bottom - top + 1
     free_y = max(0, height - band_h)
-    # Más margen arriba que abajo → el bloque baja sin reducir QR/textos.
-    new_top = int(free_y * 0.62) if free_y else 0
+    # Medio óptico en la 2×2 impresa ≈ 12% desde el borde superior.
+    target_top = int(height * 0.12)
+    new_top = min(max(0, target_top), free_y) if free_y else 0
     new_left = max(0, (width - (right - left + 1)) // 2)
 
     cropped = img.crop((left, top, right + 1, bottom + 1))
