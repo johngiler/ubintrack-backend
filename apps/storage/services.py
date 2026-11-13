@@ -299,7 +299,49 @@ def _render_position_cell_bitmap(code: str, level: str, cell_w: int, cell_h: int
     code_top = qr_y + qr_size + gap
     _draw_text_top_centered(draw, cx, code_top, code_text, code_font, bold=True)
 
-    return img.convert("1")
+    # Recentrar por tinta real (bbox geométrico deja el bloque ópticamente arriba).
+    return _center_bitmap_ink(img.convert("1"))
+
+
+def _center_bitmap_ink(img: Image.Image) -> Image.Image:
+    """Centra el contenido negro en el alto (y ancho) de la celda."""
+    if img.mode != "1":
+        img = img.convert("1")
+    width, height = img.size
+    pixels = img.load()
+
+    top = None
+    bottom = None
+    left = width
+    right = -1
+    for y in range(height):
+        row_has = False
+        for x in range(width):
+            if pixels[x, y] != 0:
+                continue
+            row_has = True
+            if x < left:
+                left = x
+            if x > right:
+                right = x
+        if row_has:
+            if top is None:
+                top = y
+            bottom = y
+
+    if top is None or right < left:
+        return img
+
+    band_h = bottom - top + 1
+    band_w = right - left + 1
+    new_top = max(0, (height - band_h) // 2)
+    new_left = max(0, (width - band_w) // 2)
+
+    cropped = img.crop((left, top, right + 1, bottom + 1))
+    out = Image.new("1", (width, height), 1)
+    out.paste(cropped, (new_left, new_top))
+    return out
+
 
 def _bitmap_to_zpl_gfa(img: Image.Image, *, x: int, y: int) -> str:
     """PIL 1-bit → ^GFA (ASCII hex). Negro = bit 1."""
