@@ -74,14 +74,19 @@ class EntryProductSimpleSerializer(serializers.ModelSerializer):
         ]
 
     def get_related_bins(self, obj):
-        """Obtiene los bins relacionados a este producto de entrada"""
-        from apps.inventory.models import BinProduct
-        bin_products = BinProduct.objects.filter(
-            entry_product=obj
-        ).select_related('bin').distinct()
-
-        # Obtener el UOM del producto (es un CharField, no una relación)
+        """Bins relacionados; usa prefetch `bin_products` si viene en el queryset."""
         uom_name = obj.product.uom if obj.product and obj.product.uom else 'Uds'
+        prefetched = getattr(obj, "_prefetched_objects_cache", {}).get("bin_products")
+        if prefetched is not None:
+            bin_products = prefetched
+        else:
+            from apps.inventory.models import BinProduct
+
+            bin_products = (
+                BinProduct.objects.filter(entry_product=obj)
+                .select_related("bin")
+                .distinct()
+            )
 
         bins = []
         for bep in bin_products:
@@ -154,6 +159,9 @@ class EntrySerializer(serializers.ModelSerializer):
         read_only_fields = ['code']
 
     def get_bins_count(self, obj):
+        annotated = getattr(obj, "bins_count_annotated", None)
+        if annotated is not None:
+            return annotated
         return obj.bins.count()
 
 
@@ -187,6 +195,54 @@ class ExitProductGroupSerializer(serializers.ModelSerializer):
         } for ep in obj.exit_products.all()]
 
 
+class ExitProductListSerializer(serializers.ModelSerializer):
+    """Campos mínimos para filas/flags del listado (sin aggregates ni alternativas)."""
+
+    bin_code = serializers.CharField(source="bin_product.bin.code", read_only=True)
+    bin_id = serializers.IntegerField(source="bin_product.bin_id", read_only=True)
+
+    class Meta:
+        model = order_models.ExitProduct
+        fields = [
+            "id",
+            "bin_id",
+            "bin_code",
+            "quantity",
+            "is_picking",
+            "is_processed",
+            "was_qr_validated",
+        ]
+
+
+class ExitProductGroupListSerializer(serializers.ModelSerializer):
+    product_name = serializers.SerializerMethodField()
+    product_sku = serializers.SerializerMethodField()
+    product_uom = serializers.SerializerMethodField()
+    exit_products = ExitProductListSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = order_models.ExitProductGroup
+        fields = [
+            "id",
+            "product",
+            "product_name",
+            "product_sku",
+            "product_uom",
+            "quantity",
+            "bin_or_batch",
+            "exit_products",
+        ]
+
+    def get_product_name(self, obj):
+        return obj.product.name if obj.product else None
+
+    def get_product_sku(self, obj):
+        return obj.product.client_sku if obj.product else None
+
+    def get_product_uom(self, obj):
+        return obj.product.uom if obj.product else None
+
+
 class ExitProductGroupWithDetailsSerializer(serializers.ModelSerializer):
     product_name = serializers.SerializerMethodField()
     product_sku = serializers.SerializerMethodField()
@@ -212,54 +268,65 @@ class ExitProductGroupWithDetailsSerializer(serializers.ModelSerializer):
         from apps.core.choices import BinStatus
         from django.db.models import Sum
 
-        products = obj.exit_products.all()
-        result = []
+        products = list(obj.exit_products.all())
+        if not products:
+            return []
 
-        for ep in products:
-            product = ep.bin_product.entry_product.product
-            client = obj.exit.client
-            has_conflict = ep.bin_product.quantity < ep.quantity
-
-            # Calcular cantidades reservadas en órdenes pendientes (solo no procesados)
+        product = obj.product
+        client = obj.exit.client if obj.exit_id else None
+        # Aggregates una vez por grupo (antes: 2× por cada ExitProduct).
+        reserved_quantity = 0
+        total_available = 0
+        if client is not None and product is not None:
             reserved_quantity = order_models.ExitProduct.objects.filter(
                 exit_product_group__exit__client=client,
                 exit_product_group__exit__status__in=[
                     'pendiente', 'en_progreso'],
                 bin_product__entry_product__product=product,
-                is_processed=False  # Solo no procesados
+                is_processed=False,
             ).aggregate(total=Sum('quantity'))['total'] or 0
 
-            # Calcular cantidad total disponible en inventario
             total_available = BinProduct.objects.filter(
                 entry_product__product=product,
                 entry_product__entry__client=client,
                 bin__status=BinStatus.ALMACENADO,
-                bin__is_active=True
+                bin__is_active=True,
             ).aggregate(total=Sum('quantity'))['total'] or 0
 
-            # Si hay conflicto, buscar el bin alternativo que se usará
-            alternative_bin_info = None
-            if has_conflict and not ep.is_processed:
-                original_batch = ep.bin_product.entry_product.batch
+        bins_completos_en_otras = None
+        result = []
 
-                # Excluir bins completos ya en otras salidas
-                bins_completos_en_otras = order_models.ExitProduct.objects.filter(
-                    exit_product_group__exit__client=client,
-                    exit_product_group__exit__status__in=[
-                        'pendiente', 'en_progreso'],
-                    bin_product__entry_product__product=product,
-                    is_picking=False
-                ).exclude(id=ep.id).values_list('bin_product__bin_id', flat=True)
+        for ep in products:
+            bp = ep.bin_product
+            entry_product = bp.entry_product if bp else None
+            prod = entry_product.product if entry_product else product
+            has_conflict = bool(bp and bp.quantity < ep.quantity)
+
+            alternative_bin_info = None
+            if has_conflict and not ep.is_processed and client is not None and prod is not None:
+                original_batch = entry_product.batch if entry_product else None
+
+                if bins_completos_en_otras is None:
+                    bins_completos_en_otras = list(
+                        order_models.ExitProduct.objects.filter(
+                            exit_product_group__exit__client=client,
+                            exit_product_group__exit__status__in=[
+                                'pendiente', 'en_progreso'],
+                            bin_product__entry_product__product=prod,
+                            is_picking=False,
+                        ).values_list('bin_product__bin_id', flat=True)
+                    )
 
                 base_query = BinProduct.objects.filter(
-                    entry_product__product=product,
+                    entry_product__product=prod,
                     entry_product__entry__client=client,
                     bin__status=BinStatus.ALMACENADO,
                     bin__is_active=True,
-                    quantity__gte=ep.quantity
-                ).exclude(bin_id__in=bins_completos_en_otras)
+                    quantity__gte=ep.quantity,
+                ).exclude(bin_id__in=bins_completos_en_otras).select_related(
+                    "bin", "bin__position", "entry_product"
+                )
 
-                # Buscar primero con mismo lote
                 alternative = None
                 if original_batch:
                     alternative = base_query.filter(
@@ -280,26 +347,25 @@ class ExitProductGroupWithDetailsSerializer(serializers.ModelSerializer):
                         'same_batch': alternative.entry_product.batch == original_batch if original_batch else False
                     }
 
+            bin_obj = bp.bin if bp else None
             result.append({
                 'id': ep.id,
-                'bin_code': ep.bin_product.bin.code,
-                'bin_id': ep.bin_product.bin.id,
-                'status': ep.bin_product.bin.get_status_display(),
-                'position': ep.bin_product.bin.position.code if ep.bin_product.bin.position else None,
-                'batch': ep.bin_product.batch,
-                'expiration_date': ep.bin_product.expiration_date,
+                'bin_code': bin_obj.code if bin_obj else None,
+                'bin_id': bin_obj.id if bin_obj else None,
+                'status': bin_obj.get_status_display() if bin_obj else None,
+                'position': bin_obj.position.code if bin_obj and bin_obj.position_id else None,
+                'batch': bp.batch if bp else None,
+                'expiration_date': bp.expiration_date if bp else None,
                 'quantity': ep.quantity,
-                'available_quantity': ep.bin_product.quantity,
+                'available_quantity': bp.quantity if bp else 0,
                 'has_stock_conflict': has_conflict,
-                # Cantidad reservada en órdenes pendientes
                 'reserved_in_pending_orders': reserved_quantity,
-                'total_inventory_available': total_available,  # Total disponible en inventario
-                # Info del bin alternativo si hay conflicto
+                'total_inventory_available': total_available,
                 'alternative_bin': alternative_bin_info,
                 'client_name': client.name if client else None,
-                'product_name': ep.bin_product.entry_product.product.name,
-                'product_sku': ep.bin_product.entry_product.product.client_sku,
-                'product_uom': ep.bin_product.entry_product.product.uom,
+                'product_name': prod.name if prod else None,
+                'product_sku': prod.client_sku if prod else None,
+                'product_uom': prod.uom if prod else None,
                 'is_picking': ep.is_picking,
                 'is_processed': ep.is_processed,
                 'was_qr_validated': ep.was_qr_validated,
@@ -360,6 +426,28 @@ class ExitDetailSimpleSerializer(serializers.ModelSerializer):
         model = order_models.ExitDetail
         fields = ['id', 'temperature', 'picking_pallets',
                   'description', 'image', 'pdf_document']
+
+
+class ExitListSerializer(serializers.ModelSerializer):
+    """Listado: grupos livianos (flags/conteos). Detalle gordo solo en retrieve."""
+
+    client = ClientSimpleSerializer(read_only=True)
+    branch = BranchSimpleSerializer(read_only=True)
+    exit_product_groups = ExitProductGroupListSerializer(many=True, read_only=True)
+    exit_detail = ExitDetailSimpleSerializer(read_only=True)
+    updated_by_name = serializers.SerializerMethodField(read_only=True)
+
+    class Meta:
+        model = order_models.Exit
+        exclude = ("created_by", "updated_by")
+        read_only_fields = ["code"]
+
+    def get_updated_by_name(self, obj):
+        if obj.updated_by:
+            from apps.core.utils.display_name import user_display_name
+
+            return user_display_name(obj.updated_by)
+        return None
 
 
 class ExitSerializer(serializers.ModelSerializer):

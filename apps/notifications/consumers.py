@@ -122,6 +122,14 @@ class NotificationConsumer(AsyncJsonWebsocketConsumer):
         payload = event.get("payload") or {}
         await self._send_json_safe({"type": "notification", "payload": payload})
 
+    async def bulk_job_message(self, event):
+        payload = event.get("payload") or {}
+        await self._send_json_safe({"type": "bulk_job", "payload": payload})
+
+    async def cava_generation_message(self, event):
+        payload = event.get("payload") or {}
+        await self._send_json_safe({"type": "cava_generation", "payload": payload})
+
     async def app_update_message(self, event):
         payload = event.get("payload") or {}
         await self._send_json_safe({"type": "app_update", "payload": payload})

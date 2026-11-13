@@ -28,6 +28,12 @@ def generate_cava_positions(job_id: int) -> None:
         logger.exception("No se pudieron crear las posiciones de la cava %s", job.cava_id)
         job.status = CavaGenerationJob.Status.FAILED
         job.save(update_fields=["status", "updated_at"])
+        try:
+            from apps.notifications.services.deliver import push_cava_generation_status
+
+            push_cava_generation_status(job)
+        except Exception:
+            logger.exception("No se pudo empujar WS de generación fallida %s", job_id)
         return
 
     job.status = CavaGenerationJob.Status.SUCCEEDED
@@ -47,7 +53,9 @@ def generate_cava_positions(job_id: int) -> None:
         from apps.audit.models import ActivityBatch, ActivitySection
         from apps.audit.services.view_log import log_bulk
         from apps.notifications.services import notify_positions_generated
+        from apps.notifications.services.deliver import push_cava_generation_status
 
+        push_cava_generation_status(job)
         notify_positions_generated(
             cava=job.cava,
             created_count=result["created"],

@@ -15,10 +15,38 @@ class CategorySerializer(serializers.ModelSerializer):
         fields = ('id', 'name', 'category_code')
 
 
+class ProductListSerializer(serializers.ModelSerializer):
+    """Listado: cliente liviano + total anotado; bins de inventario solo en detail."""
+
+    code = serializers.CharField(read_only=True)
+    category = CategorySerializer(read_only=True)
+    client = serializers.SerializerMethodField()
+    inventory_total = serializers.SerializerMethodField()
+
+    class Meta:
+        model = inventory_models.Product
+        exclude = ("created_by", "updated_by")
+
+    def get_client(self, obj):
+        if not obj.client_id:
+            return None
+        return {"id": obj.client_id, "name": obj.client.name if obj.client else None}
+
+    def get_inventory_total(self, obj):
+        annotated = getattr(obj, "inventory_total_annotated", None)
+        if annotated is not None:
+            return annotated or 0
+        total = inventory_models.BinProduct.objects.filter(
+            entry_product__product=obj,
+            bin__status="almacenado",
+        ).aggregate(total=Sum("quantity"))["total"]
+        return total or 0
+
+
 class ProductSerializer(serializers.ModelSerializer):
     code = serializers.CharField(read_only=True)
     category = CategorySerializer(read_only=True)
-    client = core_serializers.ClientSerializer(read_only=True)
+    client = serializers.SerializerMethodField()
     inventory_total = serializers.SerializerMethodField()
     inventory_bins = serializers.SerializerMethodField()
 
@@ -40,8 +68,16 @@ class ProductSerializer(serializers.ModelSerializer):
         model = inventory_models.Product
         exclude = ('created_by', 'updated_by',)
 
+    def get_client(self, obj):
+        if not obj.client_id:
+            return None
+        return {"id": obj.client_id, "name": obj.client.name if obj.client else None}
+
     def get_inventory_total(self, obj):
         """Retorna el total de unidades en bins almacenados"""
+        annotated = getattr(obj, "inventory_total_annotated", None)
+        if annotated is not None:
+            return annotated or 0
         total = inventory_models.BinProduct.objects.filter(
             entry_product__product=obj,
             bin__status='almacenado'
@@ -214,23 +250,32 @@ class BinProductSimpleSerializer(serializers.ModelSerializer):
                   'quantity', 'batch', 'expiration_date', 'reservations']
 
     def get_reservations(self, obj):
-        """Obtiene las reservas (salidas con bins no procesados) para este BinProduct"""
+        """Reservas pendientes; usa prefetch `prefetched_reservations` si existe."""
         from apps.order.models import ExitProduct
         from apps.core.choices import OrderStatus
 
-        # Obtener ExitProducts no procesados relacionados a este BinProduct
-        exit_products = ExitProduct.objects.filter(
-            bin_product=obj,
-            exit_product_group__exit__status__in=[
-                OrderStatus.PENDIENTE, OrderStatus.EN_PROGRESO],
-            is_processed=False
-        ).select_related('exit_product_group__exit').values(
-            'exit_product_group__exit__id',
-            'exit_product_group__exit__code',
-            'quantity'
-        )
+        prefetched = getattr(obj, "prefetched_reservations", None)
+        if prefetched is not None:
+            exit_products = [
+                {
+                    "exit_product_group__exit__id": ep.exit_product_group.exit_id,
+                    "exit_product_group__exit__code": ep.exit_product_group.exit.code,
+                    "quantity": ep.quantity,
+                }
+                for ep in prefetched
+            ]
+        else:
+            exit_products = ExitProduct.objects.filter(
+                bin_product=obj,
+                exit_product_group__exit__status__in=[
+                    OrderStatus.PENDIENTE, OrderStatus.EN_PROGRESO],
+                is_processed=False
+            ).select_related('exit_product_group__exit').values(
+                'exit_product_group__exit__id',
+                'exit_product_group__exit__code',
+                'quantity'
+            )
 
-        # Agrupar por salida
         reservations_by_exit = {}
         for ep in exit_products:
             exit_id = ep['exit_product_group__exit__id']
@@ -245,7 +290,6 @@ class BinProductSimpleSerializer(serializers.ModelSerializer):
                 }
             reservations_by_exit[exit_id]['total_quantity'] += quantity
 
-        # Convertir a lista
         return list(reservations_by_exit.values())
 
 
@@ -275,6 +319,8 @@ class BinSerializer(serializers.ModelSerializer):
     position = PositionSimpleSerializer(read_only=True)
     related_exits = serializers.SerializerMethodField()
     tag_image = serializers.SerializerMethodField()
+    # No serializar zpl_code (^GFA puede ser cientos de KB); flag liviano para UI.
+    has_zpl = serializers.SerializerMethodField()
 
     client_id = serializers.PrimaryKeyRelatedField(
         queryset=core_models.Client.objects.all(),
@@ -298,8 +344,14 @@ class BinSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = inventory_models.Bin
-        exclude = ('created_by', 'updated_by',)
+        exclude = ('created_by', 'updated_by', 'zpl_code')
         read_only_fields = ('workspace', 'code', 'created_at', 'updated_at')
+
+    def get_has_zpl(self, obj):
+        annotated = getattr(obj, "_has_zpl", None)
+        if annotated is not None:
+            return bool(annotated)
+        return bool((obj.zpl_code or "").strip())
 
     def get_tag_image(self, obj):
         from apps.common.utils.media_layout import media_url_with_bust
@@ -311,11 +363,16 @@ class BinSerializer(serializers.ModelSerializer):
         )
 
     def get_related_exits(self, obj):
-        """Obtiene las órdenes de salida relacionadas a este bin"""
+        """Órdenes de salida del bin. En listado se omite (N+1); detail sí las trae."""
+        view = self.context.get("view")
+        if view is not None and getattr(view, "action", None) == "list":
+            return []
+
         from apps.order.models import ExitProduct
+
         exit_products = ExitProduct.objects.filter(
             bin_product__bin=obj
-        ).select_related('exit_product_group__exit').distinct()
+        ).select_related("exit_product_group__exit").distinct()
 
         exits = []
         seen_exit_ids = set()
@@ -324,9 +381,9 @@ class BinSerializer(serializers.ModelSerializer):
             if exit_obj.id not in seen_exit_ids:
                 seen_exit_ids.add(exit_obj.id)
                 exits.append({
-                    'exit_id': exit_obj.id,
-                    'exit_code': exit_obj.code,
-                    'exit_status': exit_obj.status,
+                    "exit_id": exit_obj.id,
+                    "exit_code": exit_obj.code,
+                    "exit_status": exit_obj.status,
                 })
         return exits
 

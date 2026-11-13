@@ -262,11 +262,31 @@ class ClientViewSet(ClientScopeMixin, viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated, StrictDjangoModelPermissions]
     workspace_field = "workspace"
 
+    def get_serializer_class(self):
+        if self.action == "list":
+            return serializers.ClientListSerializer
+        return serializers.ClientSerializer
+
     def get_queryset(self):
-        qs = self.scope_to_user(super().get_queryset())
+        from django.db.models import Count, Q
+
+        from apps.core import choices as core_choices
+
+        qs = self.scope_to_user(super().get_queryset()).select_related("tariff")
         sin_tarifa = self.request.query_params.get("sin_tarifa")
         if sin_tarifa in ("1", "true", "True"):
             qs = qs.filter(tariff__isnull=True)
+        if self.action == "list":
+            qs = qs.annotate(
+                branches_count=Count("branches", distinct=True),
+                client_users_count=Count(
+                    "users",
+                    filter=Q(users__user_type=core_choices.UserType.CLIENT),
+                    distinct=True,
+                ),
+            )
+        elif self.action in ("retrieve", "update", "partial_update"):
+            qs = qs.prefetch_related("branches", "cavas", "users")
         return qs
 
     def perform_create(self, serializer):

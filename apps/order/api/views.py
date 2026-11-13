@@ -50,7 +50,24 @@ class EntryViewSet(ClientScopeMixin, viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated, StrictDjangoModelPermissions]
 
     def get_queryset(self):
-        return self.scope_to_user(super().get_queryset()).distinct()
+        from django.db.models import Count, Prefetch
+        from apps.inventory.models import BinProduct
+
+        qs = self.scope_to_user(super().get_queryset())
+        ep_qs = order_models.EntryProduct.objects.select_related(
+            "product"
+        ).prefetch_related(
+            Prefetch(
+                "bin_products",
+                queryset=BinProduct.objects.select_related("bin"),
+            )
+        )
+        return (
+            qs.select_related("client", "storage", "entry_detail")
+            .annotate(bins_count_annotated=Count("bins", distinct=True))
+            .prefetch_related(Prefetch("entry_products", queryset=ep_qs))
+            .distinct()
+        )
 
     def filter_queryset(self, queryset):
         # Verificar si es búsqueda por bin antes de aplicar filtros
@@ -511,8 +528,27 @@ class ExitViewSet(ClientScopeMixin, viewsets.ModelViewSet):
                      'exit_product_groups__product__client_sku']
     permission_classes = [IsAuthenticated, StrictDjangoModelPermissions]
 
+    def get_serializer_class(self):
+        if self.action == "list":
+            return serializers.ExitListSerializer
+        return serializers.ExitSerializer
+
     def get_queryset(self):
-        return self.scope_to_user(super().get_queryset()).distinct()
+        from django.db.models import Prefetch
+
+        qs = self.scope_to_user(super().get_queryset())
+        ep_qs = order_models.ExitProduct.objects.select_related(
+            "bin_product__bin__position",
+            "bin_product__entry_product__product",
+        )
+        groups_qs = order_models.ExitProductGroup.objects.select_related(
+            "product"
+        ).prefetch_related(Prefetch("exit_products", queryset=ep_qs))
+        return (
+            qs.select_related("client", "branch", "exit_detail", "updated_by")
+            .prefetch_related(Prefetch("exit_product_groups", queryset=groups_qs))
+            .distinct()
+        )
 
     def filter_queryset(self, queryset):
         # Verificar si es búsqueda por bin antes de aplicar filtros

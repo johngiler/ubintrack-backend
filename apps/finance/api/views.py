@@ -199,45 +199,50 @@ class BillingCalculationViewSet(viewsets.ViewSet):
         prev_start_date = subtract_month(start_date)
         prev_end_date = subtract_month(end_date)
 
-        # Obtener datos del período actual
+        # Período actual (para ordenar). Anterior solo de la página visible.
         summary = finance_services.calculate_general_billing_summary(
             start_date, end_date, workspace=workspace)
-        clients_data = summary['clients_summary']
+        clients_data = summary["clients_summary"]
 
-        # Obtener datos del período anterior
-        prev_summary = finance_services.calculate_general_billing_summary(
-            prev_start_date, prev_end_date, workspace=workspace)
-        prev_clients_data = {c['client_id']: c for c in prev_summary['clients_summary']}
-
-        # Combinar datos actuales con período anterior
-        for client in clients_data:
-            prev_client = prev_clients_data.get(client['client_id'], {})
-            client['prev_total_billing'] = prev_client.get('total_billing', 0)
-            client['prev_storage_cost'] = prev_client.get('storage_cost', 0)
-            client['prev_entries_cost'] = prev_client.get('entries_cost', 0)
-            client['prev_exits_cost'] = prev_client.get('exits_cost', 0)
-            client['prev_cost_per_pallet'] = prev_client.get('cost_per_pallet', 0)
-            client['prev_average_pallets'] = prev_client.get('average_pallets', 0)
-            
-            # Calcular variación porcentual del costo por pallet
-            current = float(client.get('cost_per_pallet', 0))
-            previous = float(client.get('prev_cost_per_pallet', 0))
-            if previous > 0:
-                client['variation_pct'] = ((current - previous) / previous) * 100
-            else:
-                client['variation_pct'] = 100 if current > 0 else 0
-
-        # Paginate manually
         paginator = self.pagination_class()
         page = paginator.paginate_queryset(clients_data, request)
+        page_rows = page if page is not None else clients_data
 
+        prev_clients_data = {}
+        for client_id in (c["client_id"] for c in page_rows):
+            prev_billing = finance_services.calculate_client_billing(
+                client_id, prev_start_date, prev_end_date
+            )
+            if not prev_billing:
+                continue
+            prev_clients_data[client_id] = {
+                "total_billing": float(prev_billing["total_billing"]),
+                "storage_cost": float(prev_billing["storage"]["total_cost"]),
+                "entries_cost": float(prev_billing["entries"]["total_cost"]),
+                "exits_cost": float(prev_billing["exits"]["total_cost"]),
+                "cost_per_pallet": prev_billing.get("cost_per_pallet", 0),
+                "average_pallets": prev_billing.get("average_pallets", 0),
+            }
+
+        for client in page_rows:
+            prev_client = prev_clients_data.get(client["client_id"], {})
+            client["prev_total_billing"] = prev_client.get("total_billing", 0)
+            client["prev_storage_cost"] = prev_client.get("storage_cost", 0)
+            client["prev_entries_cost"] = prev_client.get("entries_cost", 0)
+            client["prev_exits_cost"] = prev_client.get("exits_cost", 0)
+            client["prev_cost_per_pallet"] = prev_client.get("cost_per_pallet", 0)
+            client["prev_average_pallets"] = prev_client.get("average_pallets", 0)
+
+            current = float(client.get("cost_per_pallet", 0))
+            previous = float(client.get("prev_cost_per_pallet", 0))
+            if previous > 0:
+                client["variation_pct"] = ((current - previous) / previous) * 100
+            else:
+                client["variation_pct"] = 100 if current > 0 else 0
+
+        serializer = serializers.ClientBillingSummarySerializer(page_rows, many=True)
         if page is not None:
-            serializer = serializers.ClientBillingSummarySerializer(
-                page, many=True)
             return paginator.get_paginated_response(serializer.data)
-
-        serializer = serializers.ClientBillingSummarySerializer(
-            clients_data, many=True)
         return Response(serializer.data)
 
     @action(detail=True, methods=['get'], url_path='calculate')

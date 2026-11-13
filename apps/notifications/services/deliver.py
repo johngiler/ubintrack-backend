@@ -46,6 +46,60 @@ def _push_notification(notification: Notification) -> None:
         )
 
 
+def push_bulk_job_status(job) -> None:
+    """
+    Aviso WS al actor del BulkOperationJob (éxito o fallo).
+    El front cierra el banner async sin polling agresivo.
+    """
+    if job is None:
+        return
+    actor_id = getattr(job, "created_by_id", None)
+    if not actor_id:
+        return
+    channel_layer = get_channel_layer()
+    if channel_layer is None:
+        return
+    from apps.common.utils.bulk_jobs import serialize_bulk_job
+
+    payload = serialize_bulk_job(job, async_=False)
+    try:
+        async_to_sync(channel_layer.group_send)(
+            f"notifications_{actor_id}",
+            {"type": "bulk_job.message", "payload": payload},
+        )
+    except Exception:
+        logger.exception(
+            "No se pudo empujar bulk job %s al channel layer",
+            getattr(job, "pk", None),
+        )
+
+
+def push_cava_generation_status(job) -> None:
+    """Aviso WS al actor cuando termina (ok/fail) la generación de posiciones."""
+    if job is None:
+        return
+    actor_id = getattr(job, "created_by_id", None)
+    if not actor_id:
+        return
+    channel_layer = get_channel_layer()
+    if channel_layer is None:
+        return
+    from apps.storage.api.serializers import CavaGenerationJobSerializer
+
+    payload = CavaGenerationJobSerializer(job).data
+    payload["cava_id"] = getattr(job, "cava_id", None)
+    try:
+        async_to_sync(channel_layer.group_send)(
+            f"notifications_{actor_id}",
+            {"type": "cava_generation.message", "payload": payload},
+        )
+    except Exception:
+        logger.exception(
+            "No se pudo empujar generación de cava %s al channel layer",
+            getattr(job, "pk", None),
+        )
+
+
 def deliver_notification(
     *,
     workspace,

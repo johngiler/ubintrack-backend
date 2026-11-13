@@ -382,6 +382,46 @@ class BranchSerializer(serializers.ModelSerializer):
         return client
 
 
+class ClientListSerializer(serializers.ModelSerializer):
+    """Listado: conteos + tarifa liviana (sin users/branches/cavas anidados)."""
+
+    tariff = serializers.SerializerMethodField()
+    branches = serializers.SerializerMethodField()
+    client_users = serializers.SerializerMethodField()
+
+    class Meta:
+        model = core_models.Client
+        exclude = ("created_by", "updated_by")
+        read_only_fields = (
+            "workspace",
+            "random_id",
+            "slug",
+            "created_at",
+            "updated_at",
+        )
+
+    def get_tariff(self, obj):
+        if obj.tariff_id:
+            return {
+                "id": obj.tariff_id,
+                "name": obj.tariff.name if obj.tariff else None,
+            }
+        return None
+
+    def get_branches(self, obj):
+        # El front solo usa .length en la tabla.
+        count = getattr(obj, "branches_count", None)
+        if count is None:
+            count = obj.branches.count()
+        return [None] * int(count)
+
+    def get_client_users(self, obj):
+        count = getattr(obj, "client_users_count", None)
+        if count is None:
+            count = obj.users.filter(user_type=choices.UserType.CLIENT).count()
+        return [None] * int(count)
+
+
 class ClientSerializer(serializers.ModelSerializer):
     branches = BranchSerializer(many=True, read_only=True)
     cavas = serializers.SerializerMethodField()

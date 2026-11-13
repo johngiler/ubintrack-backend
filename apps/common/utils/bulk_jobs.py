@@ -121,6 +121,12 @@ def execute_bulk_job(
         job.status = BulkOperationJob.Status.FAILED
         job.error_message = str(exc)[:500] or "No se pudo completar la operación."
         job.save(update_fields=["status", "error_message", "updated_at"])
+        try:
+            from apps.notifications.services.deliver import push_bulk_job_status
+
+            transaction.on_commit(lambda j=job: push_bulk_job_status(j))
+        except Exception:
+            logger.exception("No se pudo empujar estado WS del bulk job %s", job_id)
         return job
 
     job.result = result
@@ -129,8 +135,14 @@ def execute_bulk_job(
     job.save(update_fields=["result", "status", "error_message", "updated_at"])
     try:
         from apps.notifications.services import notify_bulk_job_finished
+        from apps.notifications.services.deliver import push_bulk_job_status
 
-        notify_bulk_job_finished(job)
+        # Campanita (staff) + evento WS al actor (cierra banner sin poll).
+        def _notify(j=job):
+            push_bulk_job_status(j)
+            notify_bulk_job_finished(j)
+
+        transaction.on_commit(_notify)
     except Exception:
         logger.exception("No se pudo notificar bulk job %s", job_id)
     return job

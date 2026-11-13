@@ -6,6 +6,8 @@ from rest_framework.response import Response
 from rest_framework.parsers import MultiPartParser, FormParser
 from django_filters.rest_framework import DjangoFilterBackend
 from django.db import transaction
+from django.db.models import BooleanField, Case, Q, Sum, Value, When
+from django.db.models.functions import Coalesce
 from django.http import HttpResponse
 from datetime import datetime
 
@@ -37,8 +39,26 @@ class ProductViewSet(ClientScopeMixin, viewsets.ModelViewSet):
     search_fields = ['name', 'client_sku', 'client__name']
     permission_classes = [IsAuthenticated, StrictDjangoModelPermissions]
 
+    def get_serializer_class(self):
+        if self.action == "list":
+            return serializers.ProductListSerializer
+        return serializers.ProductSerializer
+
     def get_queryset(self):
-        return self.scope_to_user(super().get_queryset())
+        qs = self.scope_to_user(super().get_queryset()).select_related(
+            "client", "category"
+        )
+        return qs.annotate(
+            inventory_total_annotated=Coalesce(
+                Sum(
+                    "entry_products__bin_products__quantity",
+                    filter=Q(
+                        entry_products__bin_products__bin__status="almacenado"
+                    ),
+                ),
+                Value(0),
+            )
+        )
 
     def perform_create(self, serializer):
         from apps.audit.services.crud_hooks import SECTION, log_crud
@@ -127,7 +147,40 @@ class BinViewSet(ClientScopeMixin, viewsets.ModelViewSet):
     BULK_MAX_IDS = 10000
 
     def get_queryset(self):
-        return self.scope_to_user(super().get_queryset()).distinct()
+        from django.db.models import Prefetch
+        from apps.order.models import ExitProduct
+        from apps.core.choices import OrderStatus
+
+        # zpl_code no va en JSON; defer + flag para no arrastrar ^GFA en list/detail.
+        bp_qs = inventory_models.BinProduct.objects.select_related(
+            "entry_product__product"
+        ).prefetch_related(
+            Prefetch(
+                "exit_products",
+                queryset=ExitProduct.objects.filter(
+                    is_processed=False,
+                    exit_product_group__exit__status__in=[
+                        OrderStatus.PENDIENTE,
+                        OrderStatus.EN_PROGRESO,
+                    ],
+                ).select_related("exit_product_group__exit"),
+                to_attr="prefetched_reservations",
+            )
+        )
+        return (
+            self.scope_to_user(super().get_queryset())
+            .select_related("client", "entry", "position")
+            .prefetch_related(Prefetch("bin_products", queryset=bp_qs))
+            .defer("zpl_code")
+            .annotate(
+                _has_zpl=Case(
+                    When(Q(zpl_code__isnull=True) | Q(zpl_code=""), then=Value(False)),
+                    default=Value(True),
+                    output_field=BooleanField(),
+                )
+            )
+            .distinct()
+        )
 
     def filter_queryset(self, queryset):
         # Verificar si es búsqueda por entrada antes de aplicar filtros
@@ -888,7 +941,7 @@ class BinViewSet(ClientScopeMixin, viewsets.ModelViewSet):
                 "success": True,
                 "message": "Etiqueta regenerada.",
                 "tag_image": tag_url,
-                "zpl_code": bin_instance.zpl_code or "",
+                "has_zpl": bool((bin_instance.zpl_code or "").strip()),
             })
         return Response(
             {

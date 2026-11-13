@@ -141,6 +141,30 @@ class PositionNomenclatureSerializer(serializers.ModelSerializer):
         )
 
 
+class CavaListSerializer(serializers.ModelSerializer):
+    """Listado sin plan_layout (JSON pesado); el plano lo pide occupancy/detail."""
+
+    storage = StorageSimpleSerializer(read_only=True)
+    slot_count = serializers.SerializerMethodField()
+    active_slot_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = storage_models.Cava
+        exclude = ("created_by", "updated_by", "plan_layout")
+
+    def get_slot_count(self, obj):
+        count = getattr(obj, "position_count", None)
+        if count is not None:
+            return count
+        return obj.positions.count()
+
+    def get_active_slot_count(self, obj):
+        count = getattr(obj, "active_position_count", None)
+        if count is not None:
+            return count
+        return obj.positions.filter(is_active=True).count()
+
+
 class CavaSerializer(serializers.ModelSerializer):
     storage = StorageSimpleSerializer(read_only=True)
     storage_id = serializers.PrimaryKeyRelatedField(
@@ -323,6 +347,14 @@ class PositionSerializer(serializers.ModelSerializer):
     rack = TokenField(max_length=32)
     place = TokenField(max_length=32)
     qr_code_image = serializers.SerializerMethodField()
+    # No serializar zpl_code (bitmap/^GFA); flag liviano para UI.
+    has_zpl = serializers.SerializerMethodField()
+
+    def get_has_zpl(self, obj):
+        annotated = getattr(obj, "_has_zpl", None)
+        if annotated is not None:
+            return bool(annotated)
+        return bool((obj.zpl_code or "").strip())
 
     def get_qr_code_image(self, obj):
         from apps.common.utils.media_layout import media_url_with_bust
@@ -362,7 +394,7 @@ class PositionSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = storage_models.Position
-        exclude = ("created_by", "updated_by")
+        exclude = ("created_by", "updated_by", "zpl_code")
 
     def validate(self, attrs):
         from django.core.exceptions import ValidationError as DjangoValidationError

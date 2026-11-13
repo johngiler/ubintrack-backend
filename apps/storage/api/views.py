@@ -13,7 +13,16 @@ from apps.common.pagination import MediumPagination
 from django_filters.rest_framework import DjangoFilterBackend
 import django_filters
 from django.db import transaction
-from django.db.models import Case, Count, IntegerField, Prefetch, Q, Value, When
+from django.db.models import (
+    BooleanField,
+    Case,
+    Count,
+    IntegerField,
+    Prefetch,
+    Q,
+    Value,
+    When,
+)
 from django.db.models.functions import Cast
 
 from apps.storage import models as storage_models
@@ -97,6 +106,11 @@ class CavaViewSet(WorkspaceScopeMixin, viewsets.ModelViewSet):
     workspace_field = "storage__workspace"
     filter_backends = [filters.SearchFilter]
     search_fields = ["name", "storage__name"]
+
+    def get_serializer_class(self):
+        if self.action == "list":
+            return serializers.CavaListSerializer
+        return serializers.CavaSerializer
 
     def get_queryset(self):
         qs = self.scope_to_workspace(super().get_queryset())
@@ -450,6 +464,14 @@ class PositionViewSet(WorkspaceScopeMixin, viewsets.ModelViewSet):
                     queryset=inventory_models.Bin.objects.select_related(
                         "client", "entry"
                     ).order_by("-created_at"),
+                )
+            )
+            .defer("zpl_code")
+            .annotate(
+                _has_zpl=Case(
+                    When(Q(zpl_code__isnull=True) | Q(zpl_code=""), then=Value(False)),
+                    default=Value(True),
+                    output_field=BooleanField(),
                 )
             )
             .order_by("cava__name", "hall", "rack", "level", "place")
@@ -1049,5 +1071,5 @@ class PositionViewSet(WorkspaceScopeMixin, viewsets.ModelViewSet):
             "success": True,
             "message": "Etiqueta regenerada.",
             "qr_code_image": qr_url,
-            "zpl_code": position.zpl_code or "",
+            "has_zpl": bool((position.zpl_code or "").strip()),
         })
