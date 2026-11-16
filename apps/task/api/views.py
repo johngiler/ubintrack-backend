@@ -1,15 +1,18 @@
-from django.db.models import Count, Q
+from django.db.models import Count, Prefetch, Q
 from django_filters.rest_framework import DjangoFilterBackend
-from rest_framework import filters, mixins, viewsets
+from rest_framework import filters, mixins, status, viewsets
+from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
 
 from apps.common.utils.permissions_mixins import (
     DenyClientUsers,
     StrictDjangoModelPermissions,
     WorkspaceScopeMixin,
 )
-from apps.core.choices import TaskLineStatus
+from apps.core.choices import TaskLineStatus, TaskStatus
+from apps.inventory.models import BinProduct
 from apps.task import models as task_models
 from apps.workspaces.utils.tenant import get_workspace_for_request
 
@@ -81,6 +84,12 @@ class TaskViewSet(WorkspaceScopeMixin, viewsets.ModelViewSet):
         actor = self.request.user
         with task_log_signals_muted():
             obj = serializer.save(workspace=ws)
+
+        if obj.status == TaskStatus.IN_PROGRESS:
+            from apps.task.services.build_lines import build_task_lines
+
+            build_task_lines(obj)
+
         log_task_created(task=obj, actor=actor)
 
         assignees = list(obj.assigned_to.all())
@@ -125,6 +134,40 @@ class TaskViewSet(WorkspaceScopeMixin, viewsets.ModelViewSet):
         # Snapshot escalar antes del save (halls/client/etc.).
         old_snapshot = task_models.Task.objects.get(pk=instance.pk)
 
+        if "status" in serializer.validated_data:
+            incoming_status = serializer.validated_data["status"]
+            if incoming_status in (TaskStatus.VERIFICATION, TaskStatus.CLOSED):
+                from apps.task.services.line_actions import (
+                    next_status_after_lines,
+                    task_has_pending_lines,
+                )
+
+                if task_has_pending_lines(instance):
+                    raise ValidationError(
+                        {"detail": "No se pudo completar la operación."}
+                    )
+                # Desde en_proceso: destino según require_approval.
+                # Desde verificacion → completada se respeta (no reescribir a verificacion).
+                if instance.status == TaskStatus.IN_PROGRESS:
+                    serializer.validated_data["status"] = next_status_after_lines(
+                        instance
+                    )
+                elif instance.status == TaskStatus.VERIFICATION:
+                    if incoming_status != TaskStatus.CLOSED:
+                        serializer.validated_data["status"] = TaskStatus.VERIFICATION
+                elif incoming_status == TaskStatus.CLOSED and instance.require_approval:
+                    serializer.validated_data["status"] = TaskStatus.VERIFICATION
+
+                if (
+                    serializer.validated_data["status"] == TaskStatus.CLOSED
+                    and not instance.completed_at
+                ):
+                    from django.utils import timezone
+
+                    serializer.validated_data.setdefault(
+                        "completed_at", timezone.now()
+                    )
+
         with task_log_signals_muted():
             obj = serializer.save()
 
@@ -141,6 +184,20 @@ class TaskViewSet(WorkspaceScopeMixin, viewsets.ModelViewSet):
             scope_changes.append("Cámaras actualizadas")
         if set(obj.products.values_list("id", flat=True)) != old_product_ids:
             scope_changes.append("Productos actualizados")
+
+        if obj.status == TaskStatus.IN_PROGRESS:
+            from apps.task.services.build_lines import build_task_lines
+
+            # Primera entrada a en_proceso, o alcance cambiado sin progreso → materializar.
+            entered_progress = old_status != TaskStatus.IN_PROGRESS
+            scope_touched = bool(scope_changes)
+            has_progress = obj.lines.exclude(
+                line_status=TaskLineStatus.PENDING
+            ).exists()
+            if entered_progress or not obj.lines.exists():
+                build_task_lines(obj)
+            elif scope_touched and not has_progress:
+                build_task_lines(obj, force=True)
 
         if status_changed:
             log_task_status_change(task=obj, old_status=old_status, actor=actor)
@@ -170,6 +227,10 @@ class TaskViewSet(WorkspaceScopeMixin, viewsets.ModelViewSet):
                 resource_code=obj.code,
             )
             notify_task_status(task=obj, new_status=obj.status, actor=actor)
+            if obj.status == TaskStatus.CLOSED:
+                from apps.task.services.report_pdf import update_task_pdf
+
+                update_task_pdf(obj)
         elif added_users or removed_users:
             log_task_reassign(
                 task=obj,
@@ -214,6 +275,70 @@ class TaskViewSet(WorkspaceScopeMixin, viewsets.ModelViewSet):
             log_task_scope_change(task=obj, changes=scope_changes, actor=actor)
             log_task_meta_change(task=obj, changes=meta_changes, actor=actor)
 
+    @action(detail=True, methods=["post"], url_path="generate_lines")
+    def generate_lines(self, request, pk=None):
+        from apps.task.services.build_lines import build_task_lines, scoped_bins_count
+
+        task = self.get_object()
+        force = bool(request.data.get("force"))
+        # Sin líneas: siempre intenta crear. Con solo pendientes: force regenera.
+        if not task.lines.exists():
+            force = True
+        created = build_task_lines(task, force=force)
+        return Response(
+            {
+                "created": created,
+                "lines_count": task.lines.count(),
+                "scoped_bins": scoped_bins_count(task),
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    @action(detail=True, methods=["post"], url_path="regenerate_pdf")
+    def regenerate_pdf(self, request, pk=None):
+        from apps.task.services.report_pdf import update_task_pdf
+
+        task = self.get_object()
+        if task.status != TaskStatus.CLOSED:
+            raise ValidationError({"detail": "No se pudo completar la operación."})
+        pdf_path = update_task_pdf(task)
+        if not pdf_path:
+            raise ValidationError({"detail": "No se pudo completar la operación."})
+        task.refresh_from_db(fields=["pdf_document"])
+        pdf_url = None
+        if task.pdf_document:
+            try:
+                pdf_url = request.build_absolute_uri(task.pdf_document.url)
+            except ValueError:
+                pdf_url = None
+        return Response(
+            {"pdf_url": pdf_url or pdf_path},
+            status=status.HTTP_200_OK,
+        )
+
+    @action(detail=True, methods=["post"], url_path="verify_position")
+    def verify_position(self, request, pk=None):
+        from apps.task.services.line_actions import verify_position
+
+        task = self.get_object()
+        raw = (
+            request.data.get("position_code")
+            or request.data.get("code")
+            or request.data.get("qr")
+            or ""
+        )
+        line_id = request.data.get("line_id") or request.data.get("line")
+        lines = verify_position(
+            task=task,
+            position_code=raw,
+            actor=request.user,
+            line_id=line_id,
+        )
+        data = serializers.TaskLineSerializer(
+            lines, many=True, context={"request": request}
+        ).data
+        return Response({"results": data}, status=status.HTTP_200_OK)
+
     def perform_destroy(self, instance):
         from apps.audit.services.crud_hooks import SECTION, log_crud
         from apps.notifications.services import notify_task_deleted
@@ -245,12 +370,12 @@ class TaskLogViewSet(
 ):
     queryset = task_models.TaskLog.objects.select_related(
         "task", "created_by"
-    ).order_by("created_at", "id")
+    ).order_by("-created_at", "-id")
     serializer_class = serializers.TaskLogSerializer
     filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
     filterset_fields = ["task", "kind"]
     ordering_fields = ["created_at", "id"]
-    ordering = ["created_at", "id"]
+    ordering = ["-created_at", "-id"]
     permission_classes = [
         IsAuthenticated,
         DenyClientUsers,
@@ -270,7 +395,18 @@ class TaskLineViewSet(
     viewsets.GenericViewSet,
 ):
     queryset = task_models.TaskLine.objects.select_related(
-        "task", "position", "bin"
+        "task",
+        "position",
+        "position__cava",
+        "bin",
+        "bin__client",
+    ).prefetch_related(
+        Prefetch(
+            "bin__bin_products",
+            queryset=BinProduct.objects.filter(is_active=True).select_related(
+                "entry_product__product"
+            ),
+        )
     ).order_by("sort_order", "id")
     serializer_class = serializers.TaskLineSerializer
     filter_backends = [DjangoFilterBackend, filters.OrderingFilter]

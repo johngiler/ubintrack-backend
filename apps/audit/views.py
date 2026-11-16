@@ -73,8 +73,11 @@ class ActivityViewSet(viewsets.ReadOnlyModelViewSet):
         has_system = qs.filter(actor__isnull=True).exists()
         from apps.core.utils.display_name import user_display_name
 
-        actor_ids = (
+        # order_by() limpia Meta.ordering (-created_at); si no, Postgres
+        # DISTINCT + ORDER BY duplica el mismo actor_id.
+        actor_ids = list(
             qs.exclude(actor__isnull=True)
+            .order_by()
             .values_list("actor_id", flat=True)
             .distinct()[:200]
         )

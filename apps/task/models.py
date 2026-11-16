@@ -2,6 +2,7 @@ from django.db import models
 from django.db.models import Q
 
 from apps.common.models import BaseModel
+from apps.common.utils.media_layout import wms_task_pdf_upload
 from apps.core.choices import (
     TaskLineStatus,
     TaskPriority,
@@ -112,6 +113,12 @@ class Task(BaseModel):
     observations = models.TextField(
         null=True, blank=True, verbose_name="observaciones"
     )
+    pdf_document = models.FileField(
+        upload_to=wms_task_pdf_upload,
+        null=True,
+        blank=True,
+        verbose_name="informe PDF",
+    )
 
     class Meta:
         verbose_name = "tarea"
@@ -184,6 +191,21 @@ class TaskLine(BaseModel):
         default=TaskLineStatus.PENDING,
         verbose_name="estado de línea",
     )
+    counted_quantity = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        verbose_name="cantidad contada",
+    )
+    system_quantity = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        verbose_name="cantidad sistema al contar",
+    )
+    verified_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name="verificado en",
+    )
     sort_order = models.PositiveIntegerField(default=0, verbose_name="orden")
     notes = models.TextField(blank=True, default="", verbose_name="notas")
 
@@ -223,7 +245,7 @@ class TaskLog(BaseModel):
     class Meta:
         verbose_name = "log de tarea"
         verbose_name_plural = "logs de tarea"
-        ordering = ("created_at", "id")
+        ordering = ("-created_at", "-id")
 
     def __str__(self):
         return self.task.code

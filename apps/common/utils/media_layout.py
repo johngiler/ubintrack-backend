@@ -203,6 +203,24 @@ def build_wms_exit_pdf_relative(exit_instance) -> str:
     )
 
 
+def _workspace_from_task(task) -> object | None:
+    if task is None:
+        return None
+    ws = getattr(task, "workspace", None)
+    if ws is None and getattr(task, "workspace_id", None):
+        Workspace = apps.get_model("workspaces", "Workspace")
+        ws = Workspace.objects.filter(pk=task.workspace_id).only("slug").first()
+    return ws
+
+
+def build_wms_task_pdf_relative(task_instance) -> str:
+    owner = _owner_slug_from_instance(task_instance, _workspace_from_task)
+    safe_code = (getattr(task_instance, "code", None) or "task").replace("/", "_")
+    return _join_under_workspace_slug_stable(
+        owner, "tasks", "documents", filename=f"{safe_code}.pdf"
+    )
+
+
 def wms_bin_tag_upload(instance, filename: str) -> str:
     return build_wms_bin_tag_relative(instance)
 
@@ -243,6 +261,10 @@ def wms_exit_pdf_upload(instance, filename: str) -> str:
     if exit_order is None:
         return build_wms_exit_pdf_relative(instance)
     return build_wms_exit_pdf_relative(exit_order)
+
+
+def wms_task_pdf_upload(instance, filename: str) -> str:
+    return build_wms_task_pdf_relative(instance)
 
 
 def media_url_with_bust(file_field, *, request=None, version=None) -> str | None:

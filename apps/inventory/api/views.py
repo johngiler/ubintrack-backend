@@ -6,7 +6,7 @@ from rest_framework.response import Response
 from rest_framework.parsers import MultiPartParser, FormParser
 from django_filters.rest_framework import DjangoFilterBackend
 from django.db import transaction
-from django.db.models import BooleanField, Case, Q, Sum, Value, When
+from django.db.models import BooleanField, Case, Count, Q, Sum, Value, When
 from django.db.models.functions import Coalesce
 from django.http import HttpResponse
 from datetime import datetime
@@ -15,6 +15,7 @@ from apps.inventory import models as inventory_models
 from apps.inventory.services import export_bin_entries_excel, export_products_excel
 from apps.common.utils.permissions_mixins import ClientScopeMixin, StrictDjangoModelPermissions
 from apps.core import choices
+from apps.core.choices import TaskLineStatus
 from apps.common.utils.zebra import (
     USER_PRINT_FAILED,
     USER_PRINTER_NOT_CONFIGURED,
@@ -167,6 +168,11 @@ class BinViewSet(ClientScopeMixin, viewsets.ModelViewSet):
                 to_attr="prefetched_reservations",
             )
         )
+        resolved = [
+            TaskLineStatus.COUNTED,
+            TaskLineStatus.DISCREPANCY,
+            TaskLineStatus.MISSING_BIN,
+        ]
         return (
             self.scope_to_user(super().get_queryset())
             .select_related("client", "entry", "position")
@@ -177,7 +183,12 @@ class BinViewSet(ClientScopeMixin, viewsets.ModelViewSet):
                     When(Q(zpl_code__isnull=True) | Q(zpl_code=""), then=Value(False)),
                     default=Value(True),
                     output_field=BooleanField(),
-                )
+                ),
+                audits_count=Count(
+                    "task_lines",
+                    filter=Q(task_lines__line_status__in=resolved),
+                    distinct=True,
+                ),
             )
             .distinct()
         )
@@ -972,6 +983,33 @@ class BinViewSet(ClientScopeMixin, viewsets.ModelViewSet):
             request,
             queryset=movements,
             serializer_class=serializers.BinMovementSerializer,
+            meta={"bin_id": bin_instance.id, "bin_code": bin_instance.code},
+        )
+
+    @action(detail=True, methods=["get"], url_path="audits")
+    def audits(self, request, pk=None):
+        """Auditorías resueltas de control de inventario ligadas a este bin."""
+        from apps.common.utils.movements_pagination import paginated_movements_response
+        from apps.task.models import TaskLine
+
+        bin_instance = self.get_object()
+        resolved = [
+            TaskLineStatus.COUNTED,
+            TaskLineStatus.DISCREPANCY,
+            TaskLineStatus.MISSING_BIN,
+        ]
+        audits = (
+            TaskLine.objects.filter(
+                bin=bin_instance,
+                line_status__in=resolved,
+            )
+            .select_related("task", "position")
+            .order_by("-verified_at", "-updated_at", "-id")
+        )
+        return paginated_movements_response(
+            request,
+            queryset=audits,
+            serializer_class=serializers.BinAuditSerializer,
             meta={"bin_id": bin_instance.id, "bin_code": bin_instance.code},
         )
 

@@ -311,6 +311,34 @@ class PositionSimpleSerializer(serializers.ModelSerializer):
         fields = ['id', 'code']
 
 
+class BinAuditSerializer(serializers.Serializer):
+    """Línea de control de inventario resuelta ligada a un bin."""
+
+    id = serializers.IntegerField()
+    line_status = serializers.CharField()
+    counted_quantity = serializers.IntegerField(allow_null=True)
+    system_quantity = serializers.SerializerMethodField()
+    verified_at = serializers.DateTimeField(allow_null=True)
+    updated_at = serializers.DateTimeField()
+    position_code = serializers.SerializerMethodField()
+    task_id = serializers.IntegerField()
+    task_code = serializers.CharField(source="task.code")
+    task_title = serializers.CharField(source="task.title", allow_blank=True)
+    task_status = serializers.CharField(source="task.status")
+
+    def get_position_code(self, obj):
+        pos = getattr(obj, "position", None)
+        return pos.code if pos is not None else None
+
+    def get_system_quantity(self, obj):
+        stored = getattr(obj, "system_quantity", None)
+        if stored is not None:
+            return int(stored)
+        from apps.task.services.build_lines import bin_system_quantity
+
+        return bin_system_quantity(getattr(obj, "bin", None))
+
+
 class BinSerializer(serializers.ModelSerializer):
     client = ClientSimpleSerializer(read_only=True)
     entry = EntrySimpleSerializer(read_only=True)
@@ -321,6 +349,7 @@ class BinSerializer(serializers.ModelSerializer):
     tag_image = serializers.SerializerMethodField()
     # No serializar zpl_code (^GFA puede ser cientos de KB); flag liviano para UI.
     has_zpl = serializers.SerializerMethodField()
+    audits_count = serializers.IntegerField(read_only=True, default=0)
 
     client_id = serializers.PrimaryKeyRelatedField(
         queryset=core_models.Client.objects.all(),
@@ -345,7 +374,13 @@ class BinSerializer(serializers.ModelSerializer):
     class Meta:
         model = inventory_models.Bin
         exclude = ('created_by', 'updated_by', 'zpl_code')
-        read_only_fields = ('workspace', 'code', 'created_at', 'updated_at')
+        read_only_fields = (
+            'workspace',
+            'code',
+            'created_at',
+            'updated_at',
+            'audits_count',
+        )
 
     def get_has_zpl(self, obj):
         annotated = getattr(obj, "_has_zpl", None)

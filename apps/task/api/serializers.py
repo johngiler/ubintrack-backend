@@ -90,7 +90,21 @@ class TaskLogSerializer(serializers.ModelSerializer):
 
 class TaskLineSerializer(serializers.ModelSerializer):
     position_code = serializers.CharField(source="position.code", read_only=True)
+    position_hall = serializers.CharField(source="position.hall", read_only=True)
+    cava_name = serializers.CharField(
+        source="position.cava.name", read_only=True, default=None
+    )
     bin_code = serializers.CharField(source="bin.code", read_only=True, default=None)
+    system_quantity = serializers.SerializerMethodField()
+    product_name = serializers.SerializerMethodField()
+    product_sku = serializers.SerializerMethodField()
+    client_name = serializers.CharField(
+        source="bin.client.name", read_only=True, default=None
+    )
+    reopen = serializers.BooleanField(write_only=True, required=False, default=False)
+    missing_bin = serializers.BooleanField(
+        write_only=True, required=False, default=False
+    )
 
     class Meta:
         model = task_models.TaskLine
@@ -99,13 +113,93 @@ class TaskLineSerializer(serializers.ModelSerializer):
             "task",
             "position",
             "position_code",
+            "position_hall",
+            "cava_name",
             "bin",
             "bin_code",
+            "client_name",
+            "product_name",
+            "product_sku",
+            "system_quantity",
+            "counted_quantity",
+            "verified_at",
             "line_status",
             "sort_order",
             "notes",
+            "reopen",
+            "missing_bin",
         ]
-        read_only_fields = ["task"]
+        read_only_fields = [
+            "task",
+            "position",
+            "bin",
+            "line_status",
+            "verified_at",
+            "sort_order",
+        ]
+
+    def _primary_bin_product(self, obj):
+        bin_obj = getattr(obj, "bin", None)
+        if bin_obj is None:
+            return None
+        products = getattr(bin_obj, "bin_products", None)
+        if products is None:
+            return None
+        # prefetch → related manager; sin prefetch → queryset
+        if hasattr(products, "all"):
+            rows = list(products.all())
+        else:
+            rows = []
+        return rows[0] if rows else None
+
+    def get_system_quantity(self, obj):
+        stored = getattr(obj, "system_quantity", None)
+        if stored is not None:
+            return int(stored)
+        from apps.task.services.build_lines import bin_system_quantity
+
+        return bin_system_quantity(obj.bin)
+
+    def get_product_name(self, obj):
+        bp = self._primary_bin_product(obj)
+        if not bp or not bp.entry_product_id:
+            return None
+        product = getattr(bp.entry_product, "product", None)
+        return getattr(product, "name", None) if product else None
+
+    def get_product_sku(self, obj):
+        bp = self._primary_bin_product(obj)
+        if not bp or not bp.entry_product_id:
+            return None
+        product = getattr(bp.entry_product, "product", None)
+        return getattr(product, "client_sku", None) if product else None
+
+    def update(self, instance, validated_data):
+        from apps.task.services.line_actions import (
+            apply_count,
+            mark_missing_bin,
+            reopen_line,
+        )
+
+        request = self.context.get("request")
+        actor = getattr(request, "user", None) if request else None
+        reopen = validated_data.pop("reopen", False)
+        missing_bin = validated_data.pop("missing_bin", False)
+        counted_quantity = validated_data.pop("counted_quantity", serializers.empty)
+        notes = validated_data.pop("notes", serializers.empty)
+
+        if reopen:
+            return reopen_line(line=instance, actor=actor)
+        if missing_bin:
+            return mark_missing_bin(line=instance, actor=actor)
+        if counted_quantity is not serializers.empty:
+            instance = apply_count(
+                line=instance, counted_quantity=counted_quantity, actor=actor
+            )
+        if notes is not serializers.empty:
+            instance.notes = notes or ""
+            instance.save(update_fields=["notes", "updated_at"])
+        return instance
 
 
 class TaskListSerializer(serializers.ModelSerializer):
@@ -119,7 +213,7 @@ class TaskListSerializer(serializers.ModelSerializer):
     class Meta:
         model = task_models.Task
         exclude = ("created_by", "updated_by")
-        read_only_fields = ["code", "workspace"]
+        read_only_fields = ["code", "workspace", "pdf_document"]
 
 
 class TaskSerializer(serializers.ModelSerializer):
@@ -166,7 +260,7 @@ class TaskSerializer(serializers.ModelSerializer):
     class Meta:
         model = task_models.Task
         exclude = ("created_by", "updated_by")
-        read_only_fields = ["code", "workspace"]
+        read_only_fields = ["code", "workspace", "pdf_document"]
 
     @staticmethod
     def _bind_queryset(field, queryset):

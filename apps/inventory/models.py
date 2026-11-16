@@ -186,6 +186,17 @@ class Bin(BaseModel):
         verbose_name="incluir observación en etiqueta",
         help_text="Si está activo, la observación aparece en preview y ZPL (hasta dos líneas).",
     )
+    last_audit = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name="última auditoría",
+        help_text="Última vez que se contrastó inventario en este bin.",
+    )
+    last_audit_quantity = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        verbose_name="cantidad en última auditoría",
+    )
 
     class Meta:
         verbose_name = 'bin'

@@ -67,6 +67,7 @@ class TaskLineStatus(models.TextChoices):
     PENDING = "pendiente", "Pendiente"
     COUNTED = "contado", "Contado"
     DISCREPANCY = "diferencia", "Diferencia"
+    MISSING_BIN = "no_existe", "No existe bin"
     SKIPPED = "omitido", "Omitido"
 
 
