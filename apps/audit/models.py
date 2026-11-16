@@ -15,6 +15,7 @@ class ActivitySection(models.TextChoices):
     CLIENT = "client", "Cliente"
     PROFILE = "profile", "Perfil"
     TARIFF = "tariff", "Tarifa"
+    TASK = "task", "Tarea"
 
 
 class ActivityBatch(ImmutableAuditModel):

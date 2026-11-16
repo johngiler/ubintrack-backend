@@ -67,10 +67,80 @@ class TaskViewSet(WorkspaceScopeMixin, viewsets.ModelViewSet):
         return qs
 
     def perform_create(self, serializer):
+        from apps.audit.services.crud_hooks import SECTION, log_crud
+        from apps.notifications.services import notify_task_created
+
         ws = get_workspace_for_request(self.request)
         if ws is None:
             raise ValidationError({"detail": "Owner no resuelto."})
-        serializer.save(workspace=ws)
+        obj = serializer.save(workspace=ws)
+        log_crud(
+            workspace=ws,
+            section=SECTION.TASK,
+            action="create",
+            verb="creó la tarea",
+            label=obj.code,
+            actor=self.request.user,
+            resource_id=obj.pk,
+            resource_code=obj.code,
+        )
+        notify_task_created(task=obj, actor=self.request.user)
+
+    def perform_update(self, serializer):
+        from apps.audit.services.crud_hooks import SECTION, log_crud
+        from apps.notifications.services import notify_task_status, notify_task_updated
+
+        old_status = getattr(serializer.instance, "status", None)
+        obj = serializer.save()
+        status_changed = old_status is not None and old_status != obj.status
+        if status_changed:
+            log_crud(
+                workspace=obj.workspace,
+                section=SECTION.TASK,
+                action="status",
+                verb=f"cambió el estado de la tarea a {obj.get_status_display()}",
+                label=obj.code,
+                actor=self.request.user,
+                resource_id=obj.pk,
+                resource_code=obj.code,
+            )
+            notify_task_status(
+                task=obj, new_status=obj.status, actor=self.request.user
+            )
+        else:
+            log_crud(
+                workspace=obj.workspace,
+                section=SECTION.TASK,
+                action="update",
+                verb="actualizó la tarea",
+                label=obj.code,
+                actor=self.request.user,
+                resource_id=obj.pk,
+                resource_code=obj.code,
+            )
+            notify_task_updated(task=obj, actor=self.request.user)
+
+    def perform_destroy(self, instance):
+        from apps.audit.services.crud_hooks import SECTION, log_crud
+        from apps.notifications.services import notify_task_deleted
+
+        ws = instance.workspace
+        code = instance.code
+        pk = instance.pk
+        instance.delete()
+        log_crud(
+            workspace=ws,
+            section=SECTION.TASK,
+            action="delete",
+            verb="eliminó la tarea",
+            label=code,
+            actor=self.request.user,
+            resource_id=pk,
+            resource_code=code,
+        )
+        notify_task_deleted(
+            workspace=ws, code=code, resource_id=pk, actor=self.request.user
+        )
 
 
 class TaskLogViewSet(

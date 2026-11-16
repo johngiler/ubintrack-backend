@@ -18,6 +18,7 @@ class NotificationSerializer(serializers.ModelSerializer):
             "target",
             "message",
             "actor_display",
+            "actor_id",
             "resource_id",
             "resource_code",
             "affected_count",

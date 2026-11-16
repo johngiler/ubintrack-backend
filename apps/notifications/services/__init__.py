@@ -26,6 +26,10 @@ from apps.notifications.services.deliver import (
     notify_position_updated,
     notify_positions_bulk,
     notify_positions_generated,
+    notify_task_created,
+    notify_task_deleted,
+    notify_task_status,
+    notify_task_updated,
 )
 
 __all__ = [
@@ -56,4 +60,8 @@ __all__ = [
     "notify_position_updated",
     "notify_positions_bulk",
     "notify_positions_generated",
+    "notify_task_created",
+    "notify_task_deleted",
+    "notify_task_status",
+    "notify_task_updated",
 ]

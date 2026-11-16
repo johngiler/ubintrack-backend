@@ -108,6 +108,7 @@ def deliver_notification(
     target: str,
     message: str,
     actor_display: str = "",
+    actor=None,
     artifact: str = "",
     resource_id: int | None = None,
     resource_code: str = "",
@@ -121,6 +122,7 @@ def deliver_notification(
         target=target,
         message=message,
         actor_display=actor_display,
+        actor=actor if getattr(actor, "pk", None) else None,
         resource_id=resource_id,
         resource_code=resource_code or "",
         affected_count=max(int(affected_count), 1),
@@ -158,6 +160,7 @@ def broadcast_workspace_staff(
                 target=target,
                 message=message,
                 actor_display=actor_display,
+                actor=actor,
                 artifact=artifact,
                 resource_id=resource_id,
                 resource_code=resource_code,
@@ -590,6 +593,74 @@ def notify_cava_hilera_push(
         resource_id=cava.pk,
         resource_code=str(label)[:64],
         affected_count=updated,
+    )
+
+
+# --- Tareas ---
+
+
+def notify_task_created(*, task, actor=None) -> list[Notification]:
+    workspace = getattr(task, "workspace", None)
+    code = getattr(task, "code", "") or str(task.pk)
+    actor_name = _actor_label(actor)
+    return broadcast_workspace_staff(
+        workspace=workspace,
+        event=Notification.Event.CREATED,
+        artifact=Notification.Artifact.TASK,
+        target=Notification.Target.TASK_DETAIL,
+        message=f"{actor_name} creó la tarea {code}",
+        actor=actor,
+        resource_id=task.pk,
+        resource_code=code,
+    )
+
+
+def notify_task_updated(*, task, actor=None) -> list[Notification]:
+    workspace = getattr(task, "workspace", None)
+    code = getattr(task, "code", "") or str(task.pk)
+    actor_name = _actor_label(actor)
+    return broadcast_workspace_staff(
+        workspace=workspace,
+        event=Notification.Event.UPDATED,
+        artifact=Notification.Artifact.TASK,
+        target=Notification.Target.TASK_DETAIL,
+        message=f"{actor_name} actualizó la tarea {code}",
+        actor=actor,
+        resource_id=task.pk,
+        resource_code=code,
+    )
+
+
+def notify_task_status(*, task, new_status: str, actor=None) -> list[Notification]:
+    workspace = getattr(task, "workspace", None)
+    code = getattr(task, "code", "") or str(task.pk)
+    label = _choice_label(choices.TaskStatus, new_status)
+    actor_name = _actor_label(actor)
+    return broadcast_workspace_staff(
+        workspace=workspace,
+        event=Notification.Event.STATUS,
+        artifact=Notification.Artifact.TASK,
+        target=Notification.Target.TASK_DETAIL,
+        message=f"{actor_name} cambió la tarea {code} a {label}",
+        actor=actor,
+        resource_id=task.pk,
+        resource_code=code,
+    )
+
+
+def notify_task_deleted(
+    *, workspace, code: str, resource_id: int | None = None, actor=None
+) -> list[Notification]:
+    actor_name = _actor_label(actor)
+    return broadcast_workspace_staff(
+        workspace=workspace,
+        event=Notification.Event.DELETED,
+        artifact=Notification.Artifact.TASK,
+        target=Notification.Target.TASKS_LIST,
+        message=f"{actor_name} eliminó la tarea {code}",
+        actor=actor,
+        resource_id=resource_id,
+        resource_code=code,
     )
 
 

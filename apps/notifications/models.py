@@ -15,6 +15,7 @@ class Notification(models.Model):
         BIN = "bin", "Bin"
         POSITION = "position", "Posición"
         CAVA = "cava", "Cava"
+        TASK = "task", "Tarea"
 
     class Target(models.TextChoices):
         ENTRY_DETAIL = "entry_detail", "Detalle entrada"
@@ -25,6 +26,8 @@ class Notification(models.Model):
         POSITION_DETAIL = "position_detail", "Detalle posición"
         POSITIONS_LIST = "positions_list", "Lista posiciones"
         CAVAS_LIST = "cavas_list", "Lista cavas"
+        TASK_DETAIL = "task_detail", "Detalle tarea"
+        TASKS_LIST = "tasks_list", "Lista tareas"
 
     workspace = models.ForeignKey(
         "workspaces.Workspace",
@@ -47,6 +50,14 @@ class Notification(models.Model):
     target = models.CharField(max_length=32, choices=Target.choices)
     message = models.CharField(max_length=512)
     actor_display = models.CharField(max_length=150, blank=True, default="")
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="acted_notifications",
+        verbose_name="autor",
+    )
     resource_id = models.PositiveIntegerField(null=True, blank=True)
     resource_code = models.CharField(max_length=64, blank=True, default="")
     affected_count = models.PositiveIntegerField(default=1)
