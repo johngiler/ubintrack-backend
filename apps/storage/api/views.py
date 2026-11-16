@@ -613,7 +613,9 @@ class PositionViewSet(WorkspaceScopeMixin, viewsets.ModelViewSet):
 
     @action(detail=False, methods=["get"])
     def halls(self, request):
-        """Tokens de sección (P1, T1, …) presentes en posiciones, opcionalmente por cava(s)."""
+        """Tokens de sección (P1, T1, …) con rango de racks, opcionalmente por cava(s)."""
+        import re
+
         qs = self.get_queryset()
         cava_ids = request.query_params.getlist("cava")
         if not cava_ids:
@@ -622,15 +624,63 @@ class PositionViewSet(WorkspaceScopeMixin, viewsets.ModelViewSet):
                 cava_ids = [part.strip() for part in str(raw).split(",") if part.strip()]
         if cava_ids:
             qs = qs.filter(cava_id__in=cava_ids)
-        tokens = (
+
+        ws = get_workspace_for_request(request)
+        rack_prefix = ""
+        if ws is not None:
+            rack_prefix = (
+                storage_models.PositionNomenclature.objects.filter(workspace=ws)
+                .values_list("rack_prefix", flat=True)
+                .first()
+                or ""
+            )
+        rack_prefix = str(rack_prefix or "").strip()
+
+        def rack_sort_key(token: str):
+            text = str(token or "").strip()
+            match = re.match(r"^([A-Za-z]*)(\d+)$", text)
+            if match:
+                return (match.group(1).upper(), int(match.group(2)))
+            return (text.upper(), 0)
+
+        def format_rack(token: str) -> str:
+            text = str(token or "").strip()
+            if not text:
+                return text
+            if rack_prefix and not text.upper().startswith(rack_prefix.upper()):
+                return f"{rack_prefix}{text}"
+            return text
+
+        halls_map = {}
+        for hall, rack in (
             qs.exclude(hall="")
-            .values_list("hall", flat=True)
+            .exclude(rack="")
+            .values_list("hall", "rack")
             .distinct()
-            .order_by("hall")
-        )
-        return Response(
-            [{"value": token, "label": token} for token in tokens if str(token).strip()]
-        )
+        ):
+            token = str(hall or "").strip()
+            rack_token = str(rack or "").strip()
+            if not token or not rack_token:
+                continue
+            halls_map.setdefault(token, set()).add(rack_token)
+
+        # Pasillos sin racks aún aparecen (solo el token).
+        for hall in qs.exclude(hall="").values_list("hall", flat=True).distinct():
+            token = str(hall or "").strip()
+            if token:
+                halls_map.setdefault(token, set())
+
+        payload = []
+        for token in sorted(halls_map.keys(), key=rack_sort_key):
+            racks = sorted(halls_map[token], key=rack_sort_key)
+            if not racks:
+                label = token
+            elif len(racks) == 1:
+                label = f"{token} ({format_rack(racks[0])})"
+            else:
+                label = f"{token} ({format_rack(racks[0])}-{format_rack(racks[-1])})"
+            payload.append({"value": token, "label": label})
+        return Response(payload)
 
     @action(detail=False, methods=["get"])
     def ids(self, request):

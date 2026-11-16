@@ -2,7 +2,7 @@ from django.db.models import Q
 from rest_framework import serializers
 
 from apps.core import models as core_models
-from apps.core.choices import TaskType, UserType
+from apps.core.choices import TaskStatus, TaskType, UserType
 from apps.inventory import models as inventory_models
 from apps.storage import models as storage_models
 from apps.task import models as task_models
@@ -155,20 +155,33 @@ class TaskSerializer(serializers.ModelSerializer):
         exclude = ("created_by", "updated_by")
         read_only_fields = ["code", "workspace"]
 
+    @staticmethod
+    def _bind_queryset(field, queryset):
+        """PrimaryKeyRelatedField(many=True) guarda el QS en child_relation."""
+        field.queryset = queryset
+        child = getattr(field, "child_relation", None)
+        if child is not None:
+            child.queryset = queryset
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         request = self.context.get("request")
         workspace = get_workspace_for_request(request) if request else None
-        self.fields["assigned_to_ids"].queryset = _staff_users_for_workspace(workspace)
+        self._bind_queryset(
+            self.fields["assigned_to_ids"],
+            _staff_users_for_workspace(workspace),
+        )
         if workspace is not None:
             self.fields["client_id"].queryset = core_models.Client.objects.filter(
                 workspace=workspace
             )
-            self.fields["cava_ids"].queryset = storage_models.Cava.objects.filter(
-                storage__workspace=workspace
+            self._bind_queryset(
+                self.fields["cava_ids"],
+                storage_models.Cava.objects.filter(storage__workspace=workspace),
             )
-            self.fields["product_ids"].queryset = inventory_models.Product.objects.filter(
-                client__workspace=workspace
+            self._bind_queryset(
+                self.fields["product_ids"],
+                inventory_models.Product.objects.filter(client__workspace=workspace),
             )
 
     def get_lines_count(self, obj):
@@ -225,6 +238,12 @@ class TaskSerializer(serializers.ModelSerializer):
                     raise serializers.ValidationError(
                         {"assigned_to_ids": "Asignación no válida."}
                     )
+            if len(assigned) > 0:
+                status = attrs.get(
+                    "status", getattr(self.instance, "status", TaskStatus.PENDING)
+                )
+                if status == TaskStatus.PENDING:
+                    attrs["status"] = TaskStatus.ASSIGNED
 
         task_type = attrs.get(
             "task_type", getattr(self.instance, "task_type", None)
