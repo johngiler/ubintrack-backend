@@ -613,11 +613,15 @@ class PositionViewSet(WorkspaceScopeMixin, viewsets.ModelViewSet):
 
     @action(detail=False, methods=["get"])
     def halls(self, request):
-        """Tokens de sección (P1, T1, …) presentes en posiciones, opcionalmente por cava."""
+        """Tokens de sección (P1, T1, …) presentes en posiciones, opcionalmente por cava(s)."""
         qs = self.get_queryset()
-        cava_id = request.query_params.get("cava")
-        if cava_id:
-            qs = qs.filter(cava_id=cava_id)
+        cava_ids = request.query_params.getlist("cava")
+        if not cava_ids:
+            raw = request.query_params.get("cava")
+            if raw:
+                cava_ids = [part.strip() for part in str(raw).split(",") if part.strip()]
+        if cava_ids:
+            qs = qs.filter(cava_id__in=cava_ids)
         tokens = (
             qs.exclude(hall="")
             .values_list("hall", flat=True)

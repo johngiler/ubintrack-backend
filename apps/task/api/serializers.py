@@ -1,10 +1,12 @@
-from rest_framework import serializers
-from apps.task import models as task_models
-from apps.core import models as core_models
-from apps.order import models as order_models
-from apps.core.choices import UserType
-from apps.workspaces.utils.tenant import get_workspace_for_request
 from django.db.models import Q
+from rest_framework import serializers
+
+from apps.core import models as core_models
+from apps.core.choices import TaskType, UserType
+from apps.inventory import models as inventory_models
+from apps.storage import models as storage_models
+from apps.task import models as task_models
+from apps.workspaces.utils.tenant import get_workspace_for_request
 
 
 def _staff_users_for_workspace(workspace):
@@ -17,29 +19,94 @@ def _staff_users_for_workspace(workspace):
     return qs
 
 
+def _normalize_halls(value):
+    if value is None:
+        return []
+    if isinstance(value, str):
+        value = [value]
+    if not isinstance(value, (list, tuple)):
+        raise serializers.ValidationError({"halls": "Formato no válido."})
+    cleaned = []
+    seen = set()
+    for item in value:
+        token = str(item or "").strip()
+        if not token or token in seen:
+            continue
+        seen.add(token)
+        cleaned.append(token)
+    return cleaned
+
+
 class UserSimpleSerializer(serializers.ModelSerializer):
     class Meta:
         model = core_models.CustomUser
-        fields = ['id', 'username', 'email', 'full_name']
+        fields = ["id", "username", "email", "full_name"]
 
 
-class EntrySimpleSerializer(serializers.ModelSerializer):
+class ClientMiniSerializer(serializers.ModelSerializer):
     class Meta:
-        model = order_models.Entry
-        fields = ['id', 'code', 'status']
+        model = core_models.Client
+        fields = ["id", "name"]
 
 
-class ExitSimpleSerializer(serializers.ModelSerializer):
+class CavaMiniSerializer(serializers.ModelSerializer):
     class Meta:
-        model = order_models.Exit
-        fields = ['id', 'code', 'status']
+        model = storage_models.Cava
+        fields = ["id", "name", "code"]
+
+
+class ProductMiniSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = inventory_models.Product
+        fields = ["id", "name", "client_sku"]
 
 
 class TaskLogSerializer(serializers.ModelSerializer):
     class Meta:
         model = task_models.TaskLog
-        fields = ['id', 'task', 'message', 'created_at', 'updated_at', 'is_active']
-        read_only_fields = ['id', 'task', 'message', 'created_at', 'updated_at', 'is_active']
+        fields = ["id", "task", "message", "created_at", "updated_at", "is_active"]
+        read_only_fields = [
+            "id",
+            "task",
+            "message",
+            "created_at",
+            "updated_at",
+            "is_active",
+        ]
+
+
+class TaskLineSerializer(serializers.ModelSerializer):
+    position_code = serializers.CharField(source="position.code", read_only=True)
+    bin_code = serializers.CharField(source="bin.code", read_only=True, default=None)
+
+    class Meta:
+        model = task_models.TaskLine
+        fields = [
+            "id",
+            "task",
+            "position",
+            "position_code",
+            "bin",
+            "bin_code",
+            "line_status",
+            "sort_order",
+            "notes",
+        ]
+        read_only_fields = ["task"]
+
+
+class TaskListSerializer(serializers.ModelSerializer):
+    assigned_to = UserSimpleSerializer(many=True, read_only=True)
+    client = ClientMiniSerializer(read_only=True)
+    cavas = CavaMiniSerializer(many=True, read_only=True)
+    products = ProductMiniSerializer(many=True, read_only=True)
+    lines_count = serializers.IntegerField(read_only=True, default=0)
+    lines_done = serializers.IntegerField(read_only=True, default=0)
+
+    class Meta:
+        model = task_models.Task
+        exclude = ("created_by", "updated_by")
+        read_only_fields = ["code", "workspace"]
 
 
 class TaskSerializer(serializers.ModelSerializer):
@@ -48,122 +115,125 @@ class TaskSerializer(serializers.ModelSerializer):
         queryset=core_models.CustomUser.objects.none(),
         many=True,
         write_only=True,
-        source='assigned_to',
+        source="assigned_to",
         required=False,
     )
-    entry = EntrySimpleSerializer(read_only=True)
-    entry_id = serializers.PrimaryKeyRelatedField(
-        queryset=order_models.Entry.objects.none(),
+    client = ClientMiniSerializer(read_only=True)
+    client_id = serializers.PrimaryKeyRelatedField(
+        queryset=core_models.Client.objects.none(),
         write_only=True,
-        source='entry',
+        source="client",
         required=False,
         allow_null=True,
     )
-    exit = ExitSimpleSerializer(read_only=True)
-    exit_id = serializers.PrimaryKeyRelatedField(
-        queryset=order_models.Exit.objects.none(),
+    cavas = CavaMiniSerializer(many=True, read_only=True)
+    cava_ids = serializers.PrimaryKeyRelatedField(
+        queryset=storage_models.Cava.objects.none(),
+        many=True,
         write_only=True,
-        source='exit',
+        source="cavas",
         required=False,
-        allow_null=True,
+    )
+    products = ProductMiniSerializer(many=True, read_only=True)
+    product_ids = serializers.PrimaryKeyRelatedField(
+        queryset=inventory_models.Product.objects.none(),
+        many=True,
+        write_only=True,
+        source="products",
+        required=False,
+    )
+    halls = serializers.ListField(
+        child=serializers.CharField(allow_blank=False, max_length=64),
+        required=False,
     )
     task_logs = TaskLogSerializer(many=True, read_only=True)
+    lines_count = serializers.SerializerMethodField()
+    lines_done = serializers.SerializerMethodField()
 
     class Meta:
         model = task_models.Task
-        exclude = ('created_by', 'updated_by')
-        read_only_fields = ['code', 'workspace']
+        exclude = ("created_by", "updated_by")
+        read_only_fields = ["code", "workspace"]
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        request = self.context.get('request')
+        request = self.context.get("request")
         workspace = get_workspace_for_request(request) if request else None
-        self.fields['assigned_to_ids'].queryset = _staff_users_for_workspace(workspace)
+        self.fields["assigned_to_ids"].queryset = _staff_users_for_workspace(workspace)
         if workspace is not None:
-            self.fields['entry_id'].queryset = order_models.Entry.objects.filter(
-                client__workspace=workspace,
+            self.fields["client_id"].queryset = core_models.Client.objects.filter(
+                workspace=workspace
             )
-            self.fields['exit_id'].queryset = order_models.Exit.objects.filter(
-                client__workspace=workspace,
+            self.fields["cava_ids"].queryset = storage_models.Cava.objects.filter(
+                storage__workspace=workspace
+            )
+            self.fields["product_ids"].queryset = inventory_models.Product.objects.filter(
+                client__workspace=workspace
             )
 
-    def _validate_workspace_relations(self, attrs):
-        workspace = self.instance.workspace if self.instance else attrs.get('workspace')
+    def get_lines_count(self, obj):
+        annotated = getattr(obj, "lines_count", None)
+        if annotated is not None:
+            return annotated
+        return obj.lines.count()
+
+    def get_lines_done(self, obj):
+        annotated = getattr(obj, "lines_done", None)
+        if annotated is not None:
+            return annotated
+        from apps.core.choices import TaskLineStatus
+
+        return obj.lines.exclude(line_status=TaskLineStatus.PENDING).count()
+
+    def validate_halls(self, value):
+        return _normalize_halls(value)
+
+    def validate(self, attrs):
+        workspace = self.instance.workspace if self.instance else attrs.get("workspace")
         if workspace is None:
-            request = self.context.get('request')
+            request = self.context.get("request")
             workspace = get_workspace_for_request(request) if request else None
         if workspace is None:
             return attrs
 
-        entry = attrs.get('entry', getattr(self.instance, 'entry', None))
-        if entry and entry.client.workspace_id != workspace.id:
-            raise serializers.ValidationError(
-                {'entry_id': 'La entrada no pertenece a este owner.'}
-            )
+        client = attrs.get("client", getattr(self.instance, "client", None))
+        if client and client.workspace_id != workspace.id:
+            raise serializers.ValidationError({"client_id": "Cliente no válido."})
 
-        exit_obj = attrs.get('exit', getattr(self.instance, 'exit', None))
-        if exit_obj and exit_obj.client.workspace_id != workspace.id:
-            raise serializers.ValidationError(
-                {'exit_id': 'La salida no pertenece a este owner.'}
-            )
+        cavas = attrs.get("cavas")
+        if cavas is not None:
+            for cava in cavas:
+                if cava.storage.workspace_id != workspace.id:
+                    raise serializers.ValidationError({"cava_ids": "Cámara no válida."})
 
-        assigned = attrs.get('assigned_to')
+        products = attrs.get("products")
+        if products is not None:
+            for product in products:
+                if product.client.workspace_id != workspace.id:
+                    raise serializers.ValidationError(
+                        {"product_ids": "Producto no válido."}
+                    )
+                if client and product.client_id != client.id:
+                    raise serializers.ValidationError(
+                        {"product_ids": "Producto no válido."}
+                    )
+
+        assigned = attrs.get("assigned_to")
         if assigned is not None:
             for user in assigned:
                 if user.workspace_id != workspace.id:
                     raise serializers.ValidationError(
-                        {'assigned_to_ids': 'Un usuario asignado no pertenece a este owner.'}
+                        {"assigned_to_ids": "Asignación no válida."}
                     )
-        return attrs
 
-    def validate(self, attrs):
-        return self._validate_workspace_relations(attrs)
+        task_type = attrs.get(
+            "task_type", getattr(self.instance, "task_type", None)
+        )
+        if self.instance is None and task_type == TaskType.INVENTARIO_GENERAL:
+            attrs.setdefault("require_approval", True)
+            attrs.setdefault("include_empty_positions", True)
 
+        if task_type == TaskType.INVENTARIO_INICIAL and "products" in attrs:
+            attrs["products"] = []
 
-class TaskSimpleSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = task_models.Task
-        fields = ['id', 'code', 'status']
-
-
-class UserTaskTrackingSerializer(serializers.ModelSerializer):
-    user = UserSimpleSerializer(read_only=True)
-    user_id = serializers.PrimaryKeyRelatedField(
-        queryset=core_models.CustomUser.objects.none(),
-        write_only=True,
-        source='user',
-        required=False,
-    )
-    task = TaskSimpleSerializer(read_only=True)
-    task_id = serializers.PrimaryKeyRelatedField(
-        queryset=task_models.Task.objects.none(),
-        write_only=True,
-        source='task',
-        required=False,
-        allow_null=True,
-    )
-
-    class Meta:
-        model = task_models.UserTaskTracking
-        exclude = ('created_by', 'updated_by')
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        request = self.context.get('request')
-        workspace = get_workspace_for_request(request) if request else None
-        self.fields['user_id'].queryset = _staff_users_for_workspace(workspace)
-        if workspace is not None:
-            self.fields['task_id'].queryset = task_models.Task.objects.filter(
-                workspace=workspace,
-            )
-
-    def validate(self, attrs):
-        user = attrs.get('user', getattr(self.instance, 'user', None))
-        task = attrs.get('task', getattr(self.instance, 'task', None))
-        if self.instance is None and user is None:
-            raise serializers.ValidationError({'user_id': 'Este campo es requerido.'})
-        if user and task and user.workspace_id != task.workspace_id:
-            raise serializers.ValidationError(
-                {'task_id': 'La tarea no pertenece al mismo owner que el usuario.'}
-            )
         return attrs

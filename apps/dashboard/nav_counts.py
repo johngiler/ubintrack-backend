@@ -15,7 +15,7 @@ from apps.finance.models import Tariff
 from apps.inventory.models import Bin, Product
 from apps.order.models import Entry, Exit
 from apps.storage.models import Cava, Position, Storage
-from apps.task.models import Task, UserTaskTracking
+from apps.task.models import Task
 from apps.workspaces.utils.tenant import get_workspace_for_request
 
 
@@ -111,15 +111,12 @@ def build_nav_counts(request) -> dict[str, int]:
     if _can_see(user=user, staff_only=True, django_perm="task.view_task"):
         put(
             "/tasks/tasks",
-            Task.objects.filter(workspace=workspace, is_active=True).count(),
-        )
-
-    if not is_client_user(user) and (
-        user.has_perm("task.view_usertasktracking") or user.has_perm("task.view_tasklog")
-    ):
-        put(
-            "/tasks/trackings",
-            UserTaskTracking.objects.filter(user__workspace=workspace, is_active=True).count(),
+            Task.objects.filter(
+                workspace=workspace,
+                is_active=True,
+            )
+            .exclude(status__in=["completada", "cancelada"])
+            .count(),
         )
 
     return counts

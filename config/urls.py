@@ -46,7 +46,7 @@ router.register(r"tariffs", finance_views.TariffViewSet)
 router.register(r"billing", finance_views.BillingCalculationViewSet, basename="billing")
 router.register(r"tasks", task_views.TaskViewSet)
 router.register(r"task-logs", task_views.TaskLogViewSet)
-router.register(r"task-trackings", task_views.UserTaskTrackingViewSet)
+router.register(r"task-lines", task_views.TaskLineViewSet)
 router.register(r"notifications", NotificationViewSet, basename="notifications")
 router.register(r"activity", ActivityViewSet, basename="activity")
 

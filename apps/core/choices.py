@@ -55,17 +55,24 @@ class TaskStatus(models.TextChoices):
 
 
 class TaskType(models.TextChoices):
-    AUDIT = 'auditoria', 'Auditoría de Inventario'
-    EXPIRATION_CONTROL = 'vencimientos', 'Control de Vencimientos'
-    ERROR_CORRECTION = 'correccion', 'Corrección de Errores'
-    ENTRY_STORAGE = 'entrada_almacenamiento', 'Tarea de Entrada y Almacenamiento'
-    EXIT_DISPATCH = 'salida_despacho', 'Tarea de Salida y Despacho'
+    """Órdenes de trabajo WMS (inventario en piso)."""
+
+    INVENTARIO_INICIAL = "inventario_inicial", "Inventario inicial"
+    CONTEO_CICLICO = "conteo_ciclico", "Conteo cíclico"
+    INVENTARIO_GENERAL = "inventario_general", "Inventario general"
+
+
+class TaskLineStatus(models.TextChoices):
+    PENDING = "pendiente", "Pendiente"
+    COUNTED = "contado", "Contado"
+    DISCREPANCY = "diferencia", "Diferencia"
+    SKIPPED = "omitido", "Omitido"
 
 
 class TaskPriority(models.TextChoices):
-    LOW = 'low', 'Low'
-    MEDIUM = 'medium', 'Medium'
-    HIGH = 'high', 'High'
+    LOW = "low", "Baja"
+    MEDIUM = "medium", "Media"
+    HIGH = "high", "Alta"
 
 
 class UserType(models.TextChoices):
