@@ -119,12 +119,6 @@ class Task(BaseModel):
         ordering = ("-created_at",)
 
     def save(self, *args, **kwargs):
-        if self.task_type == TaskType.INVENTARIO_GENERAL and not self.pk:
-            if not self.require_approval:
-                self.require_approval = True
-            if not self.include_empty_positions:
-                self.include_empty_positions = True
-
         if not self.code:
             if self.workspace_id:
                 from apps.workspaces.models import Workspace

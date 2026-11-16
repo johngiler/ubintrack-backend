@@ -55,11 +55,12 @@ class TaskStatus(models.TextChoices):
 
 
 class TaskType(models.TextChoices):
-    """Órdenes de trabajo WMS (inventario en piso)."""
+    """
+    Órdenes de trabajo WMS (acción física en piso).
+    Hoy: control de inventario. Después: almacenamiento y despacho.
+    """
 
-    INVENTARIO_INICIAL = "inventario_inicial", "Inventario inicial"
-    CONTEO_CICLICO = "conteo_ciclico", "Conteo cíclico"
-    INVENTARIO_GENERAL = "inventario_general", "Inventario general"
+    CONTROL_INVENTARIO = "control_inventario", "Control de inventario"
 
 
 class TaskLineStatus(models.TextChoices):

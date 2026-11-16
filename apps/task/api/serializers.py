@@ -2,7 +2,7 @@ from django.db.models import Q
 from rest_framework import serializers
 
 from apps.core import models as core_models
-from apps.core.choices import TaskStatus, TaskType, UserType
+from apps.core.choices import TaskStatus, UserType
 from apps.inventory import models as inventory_models
 from apps.storage import models as storage_models
 from apps.task import models as task_models
@@ -244,15 +244,5 @@ class TaskSerializer(serializers.ModelSerializer):
                 )
                 if status == TaskStatus.PENDING:
                     attrs["status"] = TaskStatus.ASSIGNED
-
-        task_type = attrs.get(
-            "task_type", getattr(self.instance, "task_type", None)
-        )
-        if self.instance is None and task_type == TaskType.INVENTARIO_GENERAL:
-            attrs.setdefault("require_approval", True)
-            attrs.setdefault("include_empty_positions", True)
-
-        if task_type == TaskType.INVENTARIO_INICIAL and "products" in attrs:
-            attrs["products"] = []
 
         return attrs
