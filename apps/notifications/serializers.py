@@ -14,6 +14,7 @@ class NotificationSerializer(serializers.ModelSerializer):
         fields = [
             "id",
             "event",
+            "activity_action",
             "artifact",
             "target",
             "message",

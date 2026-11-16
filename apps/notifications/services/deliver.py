@@ -100,6 +100,15 @@ def push_cava_generation_status(job) -> None:
         )
 
 
+def _activity_action_from_event(event: str) -> str:
+    return {
+        Notification.Event.CREATED: "create",
+        Notification.Event.UPDATED: "update",
+        Notification.Event.DELETED: "delete",
+        Notification.Event.STATUS: "status",
+    }.get(event, "")
+
+
 def deliver_notification(
     *,
     workspace,
@@ -110,14 +119,17 @@ def deliver_notification(
     actor_display: str = "",
     actor=None,
     artifact: str = "",
+    activity_action: str = "",
     resource_id: int | None = None,
     resource_code: str = "",
     affected_count: int = 1,
 ) -> Notification:
+    action = (activity_action or "").strip() or _activity_action_from_event(event)
     notification = Notification.objects.create(
         workspace=workspace,
         recipient=recipient,
         event=event,
+        activity_action=action,
         artifact=artifact,
         target=target,
         message=message,
@@ -139,6 +151,7 @@ def broadcast_workspace_staff(
     message: str,
     actor=None,
     artifact: str = "",
+    activity_action: str = "",
     resource_id: int | None = None,
     resource_code: str = "",
     affected_count: int = 1,
@@ -162,6 +175,7 @@ def broadcast_workspace_staff(
                 actor_display=actor_display,
                 actor=actor,
                 artifact=artifact,
+                activity_action=activity_action,
                 resource_id=resource_id,
                 resource_code=resource_code,
                 affected_count=affected_count,
@@ -410,6 +424,7 @@ def notify_bins_bulk(
     message: str,
     count: int,
     actor=None,
+    activity_action: str = "",
 ) -> list[Notification]:
     if count <= 0 or workspace is None:
         return []
@@ -420,6 +435,7 @@ def notify_bins_bulk(
         target=Notification.Target.BINS_LIST,
         message=message,
         actor=actor,
+        activity_action=activity_action,
         affected_count=count,
     )
 
@@ -490,6 +506,7 @@ def notify_positions_generated(*, cava, created_count: int, actor=None) -> list[
         target=Notification.Target.POSITIONS_LIST,
         message=f"{actor_name} generó {created_count} {noun} en {cava_name}",
         actor=actor,
+        activity_action="generate",
         resource_id=cava.pk,
         resource_code=str(cava_name)[:64],
         affected_count=created_count,
@@ -503,6 +520,7 @@ def notify_positions_bulk(
     message: str,
     count: int,
     actor=None,
+    activity_action: str = "",
 ) -> list[Notification]:
     if count <= 0 or workspace is None:
         return []
@@ -513,6 +531,7 @@ def notify_positions_bulk(
         target=Notification.Target.POSITIONS_LIST,
         message=message,
         actor=actor,
+        activity_action=activity_action,
         affected_count=count,
     )
 
@@ -590,6 +609,7 @@ def notify_cava_hilera_push(
         target=Notification.Target.CAVAS_LIST,
         message=f"{actor_name} {verb} push en hilera {hall} de {label} ({updated} {noun})",
         actor=actor,
+        activity_action="set_hilera_push",
         resource_id=cava.pk,
         resource_code=str(label)[:64],
         affected_count=updated,
@@ -698,6 +718,7 @@ def notify_bulk_job_finished(job) -> list[Notification]:
             message=message,
             count=count,
             actor=actor,
+            activity_action="bulk_delete",
         )
 
     if kind == BulkOperationJob.Kind.POSITION_DELETE:
@@ -720,6 +741,7 @@ def notify_bulk_job_finished(job) -> list[Notification]:
             message=message,
             count=count,
             actor=actor,
+            activity_action="bulk_delete",
         )
 
     if kind == BulkOperationJob.Kind.BIN_PRINT:
@@ -743,6 +765,7 @@ def notify_bulk_job_finished(job) -> list[Notification]:
             message=message,
             count=count,
             actor=actor,
+            activity_action="bulk_print",
         )
 
     if kind == BulkOperationJob.Kind.POSITION_PRINT:
@@ -771,6 +794,7 @@ def notify_bulk_job_finished(job) -> list[Notification]:
             message=message,
             count=positions_n,
             actor=actor,
+            activity_action="bulk_print",
         )
 
     if kind == BulkOperationJob.Kind.BIN_REGENERATE_TAGS:
@@ -794,6 +818,7 @@ def notify_bulk_job_finished(job) -> list[Notification]:
             message=message,
             count=count,
             actor=actor,
+            activity_action="bulk_regenerate",
         )
 
     if kind == BulkOperationJob.Kind.POSITION_REGENERATE_TAGS:
@@ -817,6 +842,7 @@ def notify_bulk_job_finished(job) -> list[Notification]:
             message=message,
             count=count,
             actor=actor,
+            activity_action="bulk_regenerate",
         )
 
     return []

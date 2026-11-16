@@ -41,6 +41,14 @@ class Notification(models.Model):
         related_name="notifications",
     )
     event = models.CharField(max_length=32, choices=Event.choices)
+    activity_action = models.CharField(
+        max_length=64,
+        blank=True,
+        default="",
+        db_index=True,
+        verbose_name="acción de historial",
+        help_text="Clave de filtro del historial de vista (create, bulk_print, …).",
+    )
     artifact = models.CharField(
         max_length=32,
         choices=Artifact.choices,
