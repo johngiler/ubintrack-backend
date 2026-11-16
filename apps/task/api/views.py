@@ -69,56 +69,150 @@ class TaskViewSet(WorkspaceScopeMixin, viewsets.ModelViewSet):
     def perform_create(self, serializer):
         from apps.audit.services.crud_hooks import SECTION, log_crud
         from apps.notifications.services import notify_task_created
+        from apps.task.services.task_log import (
+            assignees_label,
+            log_task_created,
+            task_log_signals_muted,
+        )
 
         ws = get_workspace_for_request(self.request)
         if ws is None:
             raise ValidationError({"detail": "Owner no resuelto."})
-        obj = serializer.save(workspace=ws)
+        actor = self.request.user
+        with task_log_signals_muted():
+            obj = serializer.save(workspace=ws)
+        log_task_created(task=obj, actor=actor)
+
+        assignees = list(obj.assigned_to.all())
+        create_verb = "creó la tarea"
+        if assignees:
+            create_verb = (
+                f"creó la tarea (asignada a {assignees_label(assignees)})"
+            )
         log_crud(
             workspace=ws,
             section=SECTION.TASK,
             action="create",
-            verb="creó la tarea",
+            verb=create_verb,
             label=obj.code,
-            actor=self.request.user,
+            actor=actor,
             resource_id=obj.pk,
             resource_code=obj.code,
         )
-        notify_task_created(task=obj, actor=self.request.user)
+        notify_task_created(task=obj, actor=actor)
 
     def perform_update(self, serializer):
         from apps.audit.services.crud_hooks import SECTION, log_crud
+        from apps.core.models import CustomUser
         from apps.notifications.services import notify_task_status, notify_task_updated
+        from apps.task.services.task_log import (
+            assignees_label,
+            describe_update_changes,
+            log_task_meta_change,
+            log_task_reassign,
+            log_task_scope_change,
+            log_task_status_change,
+            task_log_signals_muted,
+        )
 
-        old_status = getattr(serializer.instance, "status", None)
-        obj = serializer.save()
-        status_changed = old_status is not None and old_status != obj.status
+        instance = serializer.instance
+        actor = self.request.user
+        old_status = instance.status
+        old_status_label = instance.get_status_display()
+        old_assignee_ids = set(instance.assigned_to.values_list("id", flat=True))
+        old_cava_ids = set(instance.cavas.values_list("id", flat=True))
+        old_product_ids = set(instance.products.values_list("id", flat=True))
+        # Snapshot escalar antes del save (halls/client/etc.).
+        old_snapshot = task_models.Task.objects.get(pk=instance.pk)
+
+        with task_log_signals_muted():
+            obj = serializer.save()
+
+        new_assignee_ids = set(obj.assigned_to.values_list("id", flat=True))
+        added_ids = new_assignee_ids - old_assignee_ids
+        removed_ids = old_assignee_ids - new_assignee_ids
+        added_users = list(CustomUser.objects.filter(id__in=added_ids))
+        removed_users = list(CustomUser.objects.filter(id__in=removed_ids))
+
+        scope_changes, meta_changes, status_changed = describe_update_changes(
+            old=old_snapshot, new=obj
+        )
+        if set(obj.cavas.values_list("id", flat=True)) != old_cava_ids:
+            scope_changes.append("Cámaras actualizadas")
+        if set(obj.products.values_list("id", flat=True)) != old_product_ids:
+            scope_changes.append("Productos actualizados")
+
         if status_changed:
+            log_task_status_change(task=obj, old_status=old_status, actor=actor)
+            # Si también hubo reasignación en el mismo save, no duplicar: ya va en status.
+            if added_users or removed_users:
+                if obj.status != "asignada" or not added_users:
+                    log_task_reassign(
+                        task=obj,
+                        added=added_users,
+                        removed=removed_users,
+                        actor=actor,
+                    )
+            verb = f"pasó {old_status_label} → {obj.get_status_display()}"
+            if obj.status == "asignada" and obj.assigned_to.exists():
+                verb = (
+                    f"{verb} · Asignados: "
+                    f"{assignees_label(obj.assigned_to.all())}"
+                )
             log_crud(
                 workspace=obj.workspace,
                 section=SECTION.TASK,
                 action="status",
-                verb=f"cambió el estado de la tarea a {obj.get_status_display()}",
+                verb=verb,
                 label=obj.code,
-                actor=self.request.user,
+                actor=actor,
                 resource_id=obj.pk,
                 resource_code=obj.code,
             )
-            notify_task_status(
-                task=obj, new_status=obj.status, actor=self.request.user
+            notify_task_status(task=obj, new_status=obj.status, actor=actor)
+        elif added_users or removed_users:
+            log_task_reassign(
+                task=obj,
+                added=added_users,
+                removed=removed_users,
+                actor=actor,
             )
-        else:
+            bits = []
+            if added_users:
+                bits.append(f"asignó a {assignees_label(added_users)}")
+            if removed_users:
+                bits.append(f"desasignó a {assignees_label(removed_users)}")
             log_crud(
                 workspace=obj.workspace,
                 section=SECTION.TASK,
-                action="update",
-                verb="actualizó la tarea",
+                action="reassign",
+                verb=" y ".join(bits) if bits else "reasignó la tarea",
                 label=obj.code,
-                actor=self.request.user,
+                actor=actor,
                 resource_id=obj.pk,
                 resource_code=obj.code,
             )
-            notify_task_updated(task=obj, actor=self.request.user)
+            notify_task_updated(task=obj, actor=actor)
+        else:
+            log_task_scope_change(task=obj, changes=scope_changes, actor=actor)
+            log_task_meta_change(task=obj, changes=meta_changes, actor=actor)
+            if scope_changes or meta_changes:
+                log_crud(
+                    workspace=obj.workspace,
+                    section=SECTION.TASK,
+                    action="update",
+                    verb="actualizó la tarea",
+                    label=obj.code,
+                    actor=actor,
+                    resource_id=obj.pk,
+                    resource_code=obj.code,
+                )
+                notify_task_updated(task=obj, actor=actor)
+
+        # Alcance en paralelo a un cambio de estado (mismo PATCH).
+        if status_changed or added_users or removed_users:
+            log_task_scope_change(task=obj, changes=scope_changes, actor=actor)
+            log_task_meta_change(task=obj, changes=meta_changes, actor=actor)
 
     def perform_destroy(self, instance):
         from apps.audit.services.crud_hooks import SECTION, log_crud
@@ -149,14 +243,14 @@ class TaskLogViewSet(
     mixins.RetrieveModelMixin,
     viewsets.GenericViewSet,
 ):
-    queryset = task_models.TaskLog.objects.select_related("task").order_by(
-        "-created_at"
-    )
+    queryset = task_models.TaskLog.objects.select_related(
+        "task", "created_by"
+    ).order_by("created_at", "id")
     serializer_class = serializers.TaskLogSerializer
     filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
-    filterset_fields = ["task"]
-    ordering_fields = ["created_at"]
-    ordering = ["-created_at"]
+    filterset_fields = ["task", "kind"]
+    ordering_fields = ["created_at", "id"]
+    ordering = ["created_at", "id"]
     permission_classes = [
         IsAuthenticated,
         DenyClientUsers,

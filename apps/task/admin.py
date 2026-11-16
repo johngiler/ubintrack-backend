@@ -118,11 +118,12 @@ class TaskAdmin(admin.ModelAdmin):
 
 @admin.register(models.TaskLog)
 class TaskLogAdmin(admin.ModelAdmin):
-    list_display = ("task", "message", "created_at", "created_by")
-    list_filter = ("task__workspace", "created_at")
+    list_display = ("task", "kind", "message", "created_at", "created_by")
+    list_filter = ("kind", "task__workspace", "created_at")
     search_fields = ("task__code", "message")
     readonly_fields = (
         "task",
+        "kind",
         "message",
         "created_at",
         "updated_at",

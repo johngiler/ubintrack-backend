@@ -200,17 +200,30 @@ class TaskLine(BaseModel):
 
 
 class TaskLog(BaseModel):
+    class Kind(models.TextChoices):
+        WORKFLOW = "workflow", "Movimiento"
+        SCOPE = "scope", "Alcance"
+        META = "meta", "Meta"
+
     task = models.ForeignKey(
         Task,
         on_delete=models.CASCADE,
         related_name="task_logs",
         verbose_name="tarea",
     )
+    kind = models.CharField(
+        max_length=16,
+        choices=Kind.choices,
+        default=Kind.META,
+        db_index=True,
+        verbose_name="tipo",
+    )
     message = models.TextField(editable=False, verbose_name="mensaje")
 
     class Meta:
         verbose_name = "log de tarea"
         verbose_name_plural = "logs de tarea"
+        ordering = ("created_at", "id")
 
     def __str__(self):
         return self.task.code

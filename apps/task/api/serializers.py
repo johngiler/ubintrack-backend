@@ -62,13 +62,26 @@ class ProductMiniSerializer(serializers.ModelSerializer):
 
 
 class TaskLogSerializer(serializers.ModelSerializer):
+    created_by = UserSimpleSerializer(read_only=True)
+
     class Meta:
         model = task_models.TaskLog
-        fields = ["id", "task", "message", "created_at", "updated_at", "is_active"]
+        fields = [
+            "id",
+            "task",
+            "kind",
+            "message",
+            "created_by",
+            "created_at",
+            "updated_at",
+            "is_active",
+        ]
         read_only_fields = [
             "id",
             "task",
+            "kind",
             "message",
+            "created_by",
             "created_at",
             "updated_at",
             "is_active",
