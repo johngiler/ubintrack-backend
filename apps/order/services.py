@@ -1151,24 +1151,101 @@ def generate_exit_pdf(exit_instance):
     elements.append(Paragraph("DOCUMENTO DE SALIDA", styles["CenterTitle"]))
     elements.append(Spacer(1, 0.25*inch))
 
-    # Información de la salida
-    # Determinar la fecha - prioridad: exit_date, created_at, N/A
+    # Información de la salida (izq) + extras normal/check (der); texto debajo
     if exit_instance.exit_date:
         fecha_salida = exit_instance.exit_date.strftime("%d/%m/%Y")
     elif exit_instance.created_at:
         fecha_salida = exit_instance.created_at.strftime("%d/%m/%Y")
     else:
         fecha_salida = "N/A"
-    elements.append(
-        Paragraph(f"<b>Fecha de Salida:</b> {fecha_salida}", styles["LeftHeading"]))
-    elements.append(
-        Paragraph(f"<b>Código de Salida:</b> {exit_instance.code}", styles["LeftHeading"]))
-    elements.append(
-        Paragraph(f"<b>Cliente:</b> {exit_instance.client.name}", styles["LeftHeading"]))
 
-    if hasattr(exit_instance, 'branch') and exit_instance.branch:
-        elements.append(
-            Paragraph(f"<b>Sucursal:</b> {exit_instance.branch.name}", styles["LeftHeading"]))
+    left_meta = [
+        Paragraph(f"<b>Fecha de Salida:</b> {fecha_salida}", styles["LeftHeading"]),
+        Paragraph(f"<b>Código de Salida:</b> {exit_instance.code}", styles["LeftHeading"]),
+        Paragraph(f"<b>Cliente:</b> {exit_instance.client.name}", styles["LeftHeading"]),
+    ]
+    if hasattr(exit_instance, "branch") and exit_instance.branch:
+        left_meta.append(
+            Paragraph(f"<b>Sucursal:</b> {exit_instance.branch.name}", styles["LeftHeading"])
+        )
+    if getattr(exit_instance, "out_type", None):
+        try:
+            left_meta.append(
+                Paragraph(
+                    f"<b>Tipo de Salida:</b> {exit_instance.get_out_type_display()}",
+                    styles["LeftHeading"],
+                )
+            )
+        except Exception:
+            pass
+
+    right_extras = []
+    texto_extras = []
+    try:
+        detail = getattr(exit_instance, "exit_detail", None)
+        raw_extras = getattr(detail, "extra_fields", None) if detail else None
+        if isinstance(raw_extras, list):
+            for item in raw_extras:
+                if not isinstance(item, dict):
+                    continue
+                name = str(item.get("name") or "").strip()
+                if not name:
+                    continue
+                field_type = str(item.get("type") or "normal").strip().lower()
+                if field_type in ("text", "number", "date", "valor"):
+                    field_type = "normal"
+                if field_type in ("textarea",):
+                    field_type = "texto"
+                if field_type in ("bool", "boolean"):
+                    field_type = "check"
+                value = item.get("value")
+                if field_type == "check":
+                    checked = value is True or str(value).strip().lower() in (
+                        "1", "true", "yes", "on", "sí", "si",
+                    )
+                    right_extras.append((name, "Sí" if checked else "No"))
+                elif field_type == "texto":
+                    text_val = str(value or "").strip()
+                    if text_val:
+                        texto_extras.append((name, text_val))
+                else:
+                    text_val = str(value or "").strip()
+                    if text_val:
+                        right_extras.append((name, text_val[:60]))
+    except Exception:
+        right_extras = []
+        texto_extras = []
+
+    if right_extras:
+        right_meta = [
+            Paragraph(f"<b>{name}:</b> {value}", styles["LeftHeading"])
+            for name, value in right_extras
+        ]
+        meta_table = Table(
+            [[left_meta, right_meta]],
+            colWidths=[3.5 * inch, 3.5 * inch],
+        )
+        meta_table.setStyle(TableStyle([
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 0),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+            ("TOPPADDING", (0, 0), (-1, -1), 0),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+        ]))
+        elements.append(meta_table)
+    else:
+        elements.extend(left_meta)
+
+    for name, text_val in texto_extras:
+        elements.append(Spacer(1, 0.12 * inch))
+        elements.append(Paragraph(f"<b>{name}:</b>", styles["LeftHeading"]))
+        safe = (
+            text_val.replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+            .replace("\n", "<br/>")
+        )
+        elements.append(Paragraph(safe, styles["LeftHeading"]))
 
     elements.append(Spacer(1, 0.25*inch))
 
@@ -1320,6 +1397,63 @@ def generate_exit_pdf(exit_instance):
         elements.append(Spacer(1, 0.75*inch))
         elements.extend(footer)
 
+    # Imágenes al final del documento (si el check está activo)
+    try:
+        detail = getattr(exit_instance, "exit_detail", None)
+        if detail and getattr(detail, "include_images_in_pdf", False):
+            from io import BytesIO as _BytesIO
+
+            from reportlab.platypus import Image as RLImage
+
+            img_flowables = []
+            for field in detail.iter_report_images():
+                try:
+                    with field.open("rb") as fh:
+                        raw = fh.read()
+                    if not raw:
+                        continue
+                    buf = _BytesIO(raw)
+                    img = RLImage(buf)
+                    max_w = 3.2 * inch
+                    max_h = 3.2 * inch
+                    iw = float(getattr(img, "imageWidth", max_w) or max_w)
+                    ih = float(getattr(img, "imageHeight", max_h) or max_h)
+                    scale = min(max_w / iw, max_h / ih, 1.0)
+                    img.drawWidth = iw * scale
+                    img.drawHeight = ih * scale
+                    img_flowables.append(img)
+                except Exception:
+                    continue
+            if img_flowables:
+                elements.append(Spacer(1, 0.4 * inch))
+                elements.append(
+                    Paragraph("<b>Imágenes adjuntas</b>", styles["LeftHeading"])
+                )
+                elements.append(Spacer(1, 0.15 * inch))
+                row = []
+                rows = []
+                for img in img_flowables:
+                    row.append(img)
+                    if len(row) == 2:
+                        rows.append(row)
+                        row = []
+                if row:
+                    while len(row) < 2:
+                        row.append("")
+                    rows.append(row)
+                gallery = Table(rows, colWidths=[3.5 * inch, 3.5 * inch])
+                gallery.setStyle(TableStyle([
+                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                    ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 4),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+                    ("TOPPADDING", (0, 0), (-1, -1), 6),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+                ]))
+                elements.append(gallery)
+    except Exception:
+        pass
+
     # Generar PDF
     doc.build(elements)
 
@@ -1338,6 +1472,20 @@ def update_exit_pdf(exit_instance):
     Args:
         exit_instance: Instancia del modelo Exit
     """
+    from apps.order.models import Exit
+
+    exit_instance = (
+        Exit.objects.select_related("client__workspace", "branch", "exit_detail")
+        .prefetch_related(
+            "exit_product_groups__product",
+            "exit_product_groups__exit_products",
+            "exit_detail__images",
+        )
+        .filter(pk=exit_instance.pk)
+        .first()
+        or exit_instance
+    )
+
     # Intentar generar el PDF con reintentos
     max_retries = 3
     retry_delay = 1  # segundos

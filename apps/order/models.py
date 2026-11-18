@@ -930,9 +930,22 @@ class ExitDetail(BaseModel):
     description = models.TextField(
         null=True, blank=True, verbose_name='descripción')
 
+    # Legacy: una sola imagen; preferir ExitDetailImage.
     image = models.ImageField(
         upload_to=wms_exit_detail_image_upload, null=True, blank=True,
         verbose_name='imagen')
+
+    include_images_in_pdf = models.BooleanField(
+        default=False,
+        verbose_name='incluir imágenes en el PDF',
+    )
+
+    extra_fields = models.JSONField(
+        default=list,
+        blank=True,
+        verbose_name='campos extras',
+        help_text='Lista de {name, type: normal|check|texto, value}',
+    )
 
     pdf_document = models.FileField(
         upload_to=wms_exit_pdf_upload,
@@ -945,19 +958,43 @@ class ExitDetail(BaseModel):
         verbose_name = 'detalle de la orden de salida'
         verbose_name_plural = 'detalle de la orden de salida'
 
-    def save(self, *args, **kwargs):
-        if self.pk:
-            old_image = ExitDetail.objects.filter(pk=self.pk).first().image
-            if self.image and old_image != self.image:
-                ext = os.path.splitext(self.image.name)[1]
-                self.image.name = f'{self.exit.code}{ext}'
-        elif self.image:
-            ext = os.path.splitext(self.image.name)[1]
-            self.image.name = f'{self.exit.code}{ext}'
-        super().save(*args, **kwargs)
-
     def __str__(self):
         return self.exit.code
+
+    def iter_report_images(self):
+        gallery = list(self.images.all().order_by("sort_order", "id"))
+        if gallery:
+            for row in gallery:
+                if row.image:
+                    yield row.image
+            return
+        if self.image:
+            yield self.image
+
+
+class ExitDetailImage(BaseModel):
+    exit_detail = models.ForeignKey(
+        ExitDetail,
+        on_delete=models.CASCADE,
+        related_name="images",
+        verbose_name="detalle de salida",
+    )
+    image = models.ImageField(
+        upload_to=wms_exit_detail_image_upload,
+        verbose_name="imagen",
+    )
+    sort_order = models.PositiveSmallIntegerField(
+        default=0,
+        verbose_name="orden",
+    )
+
+    class Meta:
+        verbose_name = "imagen de detalle de salida"
+        verbose_name_plural = "imágenes de detalle de salida"
+        ordering = ["sort_order", "id"]
+
+    def __str__(self):
+        return f"{self.exit_detail_id}#{self.pk}"
 
 
 class ExitMovementType(models.TextChoices):

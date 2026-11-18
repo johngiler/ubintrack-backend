@@ -753,7 +753,9 @@ class ExitViewSet(ClientScopeMixin, viewsets.ModelViewSet):
             "product"
         ).prefetch_related(Prefetch("exit_products", queryset=ep_qs))
         return (
-            qs.select_related("client", "branch", "exit_detail", "updated_by")
+            qs.select_related("client", "branch", "exit_detail", "updated_by").prefetch_related(
+                "exit_detail__images"
+            )
             .prefetch_related(Prefetch("exit_product_groups", queryset=groups_qs))
             .distinct()
         )

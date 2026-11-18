@@ -250,12 +250,21 @@ def wms_entry_detail_image_upload(instance, filename: str) -> str:
 
 
 def wms_exit_detail_image_upload(instance, filename: str) -> str:
+    """ExitDetail.image (legacy) o ExitDetailImage.image."""
     exit_order = getattr(instance, "exit", None)
+    if exit_order is None:
+        detail = getattr(instance, "exit_detail", None)
+        exit_order = getattr(detail, "exit", None) if detail is not None else None
     owner = _owner_slug_from_instance(exit_order, _workspace_from_exit) if exit_order else "unknown"
     ext = os.path.splitext(filename)[1] or ".jpg"
-    code = getattr(exit_order, "code", None) or get_valid_filename(filename)
+    code = getattr(exit_order, "code", None) or "exit"
+    base = get_valid_filename(os.path.splitext(filename)[0]) or "img"
     return _join_under_workspace_slug(
-        owner, "orders", "exits", "images", filename=f"{code}{ext}"
+        owner,
+        "orders",
+        "exits",
+        "images",
+        filename=f"{code}_{base}{ext}",
     )
 
 

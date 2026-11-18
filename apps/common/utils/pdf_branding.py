@@ -2,11 +2,18 @@
 from __future__ import annotations
 
 import logging
+import os
 import shutil
 import subprocess
 from io import BytesIO
 
 logger = logging.getLogger(__name__)
+
+_RSVG_CANDIDATES = (
+    "/opt/homebrew/bin/rsvg-convert",
+    "/usr/local/bin/rsvg-convert",
+    "/usr/bin/rsvg-convert",
+)
 
 
 def workspace_display_name(workspace):
@@ -32,9 +39,19 @@ def _is_svg_bytes(raw: bytes) -> bool:
     )
 
 
-def _svg_to_png_bytes(raw: bytes, *, width: int = 800) -> bytes | None:
-    """Rasteriza SVG → PNG con rsvg-convert si está disponible."""
-    rsvg = shutil.which("rsvg-convert")
+def _find_rsvg_convert() -> str | None:
+    """rsvg-convert: PATH + rutas habituales (runserver/systemd suelen omitir Homebrew)."""
+    found = shutil.which("rsvg-convert")
+    if found and os.path.isfile(found) and os.access(found, os.X_OK):
+        return found
+    for path in _RSVG_CANDIDATES:
+        if os.path.isfile(path) and os.access(path, os.X_OK):
+            return path
+    return None
+
+
+def _svg_to_png_via_rsvg(raw: bytes, *, width: int = 800) -> bytes | None:
+    rsvg = _find_rsvg_convert()
     if not rsvg:
         return None
     try:
@@ -53,12 +70,63 @@ def _svg_to_png_bytes(raw: bytes, *, width: int = 800) -> bytes | None:
             (proc.stderr or b"")[:200],
         )
     except Exception:
-        logger.exception("No se pudo rasterizar SVG del logo")
+        logger.exception("No se pudo rasterizar SVG del logo con rsvg-convert")
     return None
 
 
+def _svg_to_drawing(raw: bytes, max_side: float):
+    """Fallback sin rsvg: Drawing ReportLab vía svglib."""
+    try:
+        from svglib.svglib import svg2rlg
+    except ImportError:
+        return None
+    try:
+        drawing = svg2rlg(BytesIO(raw))
+    except Exception:
+        logger.exception("svglib no pudo parsear el SVG del logo")
+        return None
+    if drawing is None:
+        return None
+    try:
+        w = float(drawing.width or 1)
+        h = float(drawing.height or 1)
+        if w <= 0 or h <= 0:
+            return None
+        scale = min(max_side / w, max_side / h)
+        if scale <= 0:
+            return None
+        drawing.width = w * scale
+        drawing.height = h * scale
+        drawing.scale(scale, scale)
+        if hasattr(drawing, "hAlign"):
+            drawing.hAlign = "CENTER"
+        return drawing
+    except Exception:
+        logger.exception("No se pudo escalar el Drawing del logo SVG")
+        return None
+
+
+def _svg_to_png_bytes(raw: bytes, *, width: int = 800) -> bytes | None:
+    """Rasteriza SVG → PNG (rsvg-convert) o None si no hay convertidor."""
+    png = _svg_to_png_via_rsvg(raw, width=width)
+    if png:
+        return png
+
+    # Último recurso: renderPM si svglib + backend raster están disponibles
+    try:
+        from svglib.svglib import svg2rlg
+        from reportlab.graphics import renderPM
+
+        drawing = svg2rlg(BytesIO(raw))
+        if drawing is None:
+            return None
+        return renderPM.drawToString(drawing, fmt="PNG")
+    except Exception:
+        return None
+
+
 def _field_to_png_bytes(field) -> bytes | None:
-    """Lee logo/isotipo y devuelve PNG (soporta SVG vía rsvg-convert)."""
+    """Lee logo/isotipo y devuelve PNG (soporta SVG vía rsvg/svglib)."""
     if not field:
         return None
     try:
@@ -128,24 +196,56 @@ def draw_workspace_brand_header_pil(tag, draw, workspace, tag_width, y, title_fo
 
 
 def workspace_logo_image(workspace, size=1.5):
-    """Solo el Image del logo del workspace, o None si no hay."""
+    """Solo el Image/Drawing del logo del workspace, o None si no hay."""
     from reportlab.lib.units import inch
     from reportlab.platypus import Image
 
     if workspace is None:
         return None
 
+    max_side = float(size * inch)
+
     for attr in ("logo", "logo_mark"):
         field = getattr(workspace, attr, None)
+        if not field:
+            continue
+        try:
+            with field.open("rb") as fh:
+                raw = fh.read()
+        except Exception:
+            continue
+        if not raw:
+            continue
+
+        # SVG: PNG vía rsvg/renderPM, o Drawing vía svglib
+        if _is_svg_bytes(raw):
+            png = _svg_to_png_bytes(raw)
+            if png:
+                try:
+                    buf = BytesIO(png)
+                    img = Image(buf, mask="auto")
+                    img._ubintrack_buf = buf  # evitar GC del buffer
+                    img._restrictSize(max_side, max_side)
+                    return img
+                except Exception:
+                    logger.exception("ReportLab no pudo cargar PNG del logo SVG")
+            drawing = _svg_to_drawing(raw, max_side)
+            if drawing is not None:
+                return drawing
+            continue
+
+        # Raster (webp/png/jpeg/…)
         png = _field_to_png_bytes(field)
         if not png:
             continue
         try:
             buf = BytesIO(png)
-            img = Image(buf)
-            img._restrictSize(size * inch, size * inch)
+            img = Image(buf, mask="auto")
+            img._ubintrack_buf = buf
+            img._restrictSize(max_side, max_side)
             return img
         except Exception:
+            logger.exception("ReportLab no pudo cargar el logo raster")
             continue
     return None
 
@@ -172,7 +272,8 @@ def append_workspace_logo(elements, workspace, fallback_style, size=1.5):
 
     logo = workspace_logo_image(workspace, size=size)
     if logo is not None:
-        logo.hAlign = "CENTER"
+        if hasattr(logo, "hAlign"):
+            logo.hAlign = "CENTER"
         elements.append(logo)
         return True
 

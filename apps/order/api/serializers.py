@@ -577,24 +577,125 @@ class ExitProductSimpleSerializer(serializers.ModelSerializer):
         return representation
 
 
+class ExitDetailImageSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = order_models.ExitDetailImage
+        fields = ["id", "image", "sort_order"]
+
+
 class ExitDetailSerializer(serializers.ModelSerializer):
     exit_id = serializers.PrimaryKeyRelatedField(
         queryset=order_models.Exit.objects.all(),
         source='exit',
         write_only=True
     )
+    images = ExitDetailImageSerializer(many=True, read_only=True)
+    delete_image_ids = serializers.CharField(
+        required=False, allow_blank=True, write_only=True
+    )
 
     class Meta:
         model = order_models.ExitDetail
         exclude = ('created_by', 'updated_by')
-        extra_kwargs = {'exit': {'read_only': True}}
+        extra_kwargs = {
+            'exit': {'read_only': True},
+            'image': {'required': False, 'allow_null': True},
+        }
+
+    def to_internal_value(self, data):
+        mutable = data
+        try:
+            if hasattr(data, "copy"):
+                mutable = data.copy()
+        except Exception:
+            mutable = data
+        if hasattr(mutable, "get"):
+            flag = mutable.get("include_images_in_pdf")
+            if isinstance(flag, str):
+                mutable["include_images_in_pdf"] = flag.strip().lower() in (
+                    "1",
+                    "true",
+                    "yes",
+                    "on",
+                )
+            temp = mutable.get("temperature")
+            if temp == "":
+                mutable["temperature"] = None
+        return super().to_internal_value(mutable)
+
+    def validate_extra_fields(self, value):
+        return _parse_extra_fields(value)
+
+    def validate_temperature(self, value):
+        if value == "" or value is None:
+            return None
+        return value
+
+    def create(self, validated_data):
+        validated_data.pop("delete_image_ids", None)
+        request = self.context.get("request")
+        detail = super().create(validated_data)
+        self._apply_uploaded_images(detail, request)
+        return detail
+
+    def update(self, instance, validated_data):
+        delete_raw = validated_data.pop("delete_image_ids", "")
+        request = self.context.get("request")
+        detail = super().update(instance, validated_data)
+        self._delete_images(detail, delete_raw)
+        self._apply_uploaded_images(detail, request)
+        if not detail.images.exists() and not detail.image:
+            if detail.include_images_in_pdf:
+                detail.include_images_in_pdf = False
+                detail.save(update_fields=["include_images_in_pdf"])
+        return detail
+
+    def _delete_images(self, detail, delete_raw):
+        if not delete_raw:
+            return
+        ids = []
+        for part in str(delete_raw).split(","):
+            part = part.strip()
+            if part.isdigit():
+                ids.append(int(part))
+        if not ids:
+            return
+        detail.images.filter(id__in=ids).delete()
+
+    def _apply_uploaded_images(self, detail, request):
+        if request is None or not hasattr(request, "FILES"):
+            return
+        files = request.FILES.getlist("images") or request.FILES.getlist("images[]")
+        single = request.FILES.get("image")
+        if single and not files:
+            files = [single]
+        if not files:
+            return
+        start = detail.images.count()
+        for idx, uploaded in enumerate(files):
+            order_models.ExitDetailImage.objects.create(
+                exit_detail=detail,
+                image=uploaded,
+                sort_order=start + idx,
+            )
 
 
 class ExitDetailSimpleSerializer(serializers.ModelSerializer):
+    images = ExitDetailImageSerializer(many=True, read_only=True)
+
     class Meta:
         model = order_models.ExitDetail
-        fields = ['id', 'temperature', 'picking_pallets',
-                  'description', 'image', 'pdf_document']
+        fields = [
+            "id",
+            "temperature",
+            "picking_pallets",
+            "description",
+            "image",
+            "images",
+            "include_images_in_pdf",
+            "extra_fields",
+            "pdf_document",
+        ]
 
 
 class ExitListSerializer(serializers.ModelSerializer):

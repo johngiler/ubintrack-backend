@@ -112,8 +112,17 @@ class ExitProductInline(admin.TabularInline):
 
 class ExitDetailInline(admin.StackedInline):
     model = models.ExitDetail
-    fields = ('temperature', 'description', 'image_preview', 'image', 'pdf_document')
-    readonly_fields = ('image_preview',)
+    fields = (
+        "temperature",
+        "description",
+        "picking_pallets",
+        "include_images_in_pdf",
+        "extra_fields",
+        "image_preview",
+        "image",
+        "pdf_document",
+    )
+    readonly_fields = ("image_preview",)
 
     def image_preview(self, obj):
         if obj.image:
