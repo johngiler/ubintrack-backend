@@ -230,12 +230,22 @@ def wms_position_qr_upload(instance, filename: str) -> str:
 
 
 def wms_entry_detail_image_upload(instance, filename: str) -> str:
+    """EntryDetail.image (legacy) o EntryDetailImage.image."""
     entry = getattr(instance, "entry", None)
+    if entry is None:
+        detail = getattr(instance, "entry_detail", None)
+        entry = getattr(detail, "entry", None) if detail is not None else None
     owner = _owner_slug_from_instance(entry, _workspace_from_entry) if entry else "unknown"
     ext = os.path.splitext(filename)[1] or ".jpg"
-    code = getattr(entry, "code", None) or get_valid_filename(filename)
+    code = getattr(entry, "code", None) or "entry"
+    base = get_valid_filename(os.path.splitext(filename)[0]) or "img"
+    # Unicidad por nombre de archivo original + código de entrada.
     return _join_under_workspace_slug(
-        owner, "orders", "entries", "images", filename=f"{code}{ext}"
+        owner,
+        "orders",
+        "entries",
+        "images",
+        filename=f"{code}_{base}{ext}",
     )
 
 

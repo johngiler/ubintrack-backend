@@ -253,9 +253,22 @@ class EntryDetail(BaseModel):
     description = models.TextField(
         null=True, blank=True, verbose_name='descripción')
 
+    # Legacy: una sola imagen; preferir EntryDetailImage.
     image = models.ImageField(
         upload_to=wms_entry_detail_image_upload, null=True, blank=True,
         verbose_name='imagen')
+
+    include_images_in_pdf = models.BooleanField(
+        default=False,
+        verbose_name='incluir imágenes en el PDF',
+    )
+
+    extra_fields = models.JSONField(
+        default=list,
+        blank=True,
+        verbose_name='campos extras',
+        help_text='Lista de {name, type: normal|check|texto, value}',
+    )
 
     pdf_document = models.FileField(
         upload_to=wms_entry_pdf_upload,
@@ -268,19 +281,44 @@ class EntryDetail(BaseModel):
         verbose_name = 'detalle de la orden de entrada'
         verbose_name_plural = 'detalle de la orden de entrada'
 
-    def save(self, *args, **kwargs):
-        if self.pk:
-            old_image = EntryDetail.objects.filter(pk=self.pk).first().image
-            if self.image and old_image != self.image:
-                ext = os.path.splitext(self.image.name)[1]
-                self.image.name = f'{self.entry.code}{ext}'
-        elif self.image:
-            ext = os.path.splitext(self.image.name)[1]
-            self.image.name = f'{self.entry.code}{ext}'
-        super().save(*args, **kwargs)
-
     def __str__(self):
         return self.entry.code
+
+    def iter_report_images(self):
+        """Imágenes para el PDF: EntryDetailImage + legacy image si no hay filas."""
+        gallery = list(self.images.all().order_by("sort_order", "id"))
+        if gallery:
+            for row in gallery:
+                if row.image:
+                    yield row.image
+            return
+        if self.image:
+            yield self.image
+
+
+class EntryDetailImage(BaseModel):
+    entry_detail = models.ForeignKey(
+        EntryDetail,
+        on_delete=models.CASCADE,
+        related_name="images",
+        verbose_name="detalle de entrada",
+    )
+    image = models.ImageField(
+        upload_to=wms_entry_detail_image_upload,
+        verbose_name="imagen",
+    )
+    sort_order = models.PositiveSmallIntegerField(
+        default=0,
+        verbose_name="orden",
+    )
+
+    class Meta:
+        verbose_name = "imagen de detalle de entrada"
+        verbose_name_plural = "imágenes de detalle de entrada"
+        ordering = ["sort_order", "id"]
+
+    def __str__(self):
+        return f"{self.entry_detail_id}#{self.pk}"
 
 
 class Exit(BaseModel):

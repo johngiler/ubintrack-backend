@@ -14,6 +14,12 @@ def _runner_for(kind: str):
         run_bin_print,
         run_bin_regenerate_tags,
     )
+    from apps.order.services_bulk import (
+        run_entry_delete,
+        run_entry_regenerate_pdfs,
+        run_exit_delete,
+        run_exit_regenerate_pdfs,
+    )
     from apps.storage.services_bulk import (
         run_position_delete,
         run_position_print,
@@ -27,6 +33,10 @@ def _runner_for(kind: str):
         BulkOperationJob.Kind.POSITION_REGENERATE_TAGS: run_position_regenerate_tags,
         BulkOperationJob.Kind.POSITION_PRINT: run_position_print,
         BulkOperationJob.Kind.POSITION_DELETE: run_position_delete,
+        BulkOperationJob.Kind.ENTRY_REGENERATE_PDFS: run_entry_regenerate_pdfs,
+        BulkOperationJob.Kind.EXIT_REGENERATE_PDFS: run_exit_regenerate_pdfs,
+        BulkOperationJob.Kind.ENTRY_DELETE: run_entry_delete,
+        BulkOperationJob.Kind.EXIT_DELETE: run_exit_delete,
     }.get(kind)
 
 

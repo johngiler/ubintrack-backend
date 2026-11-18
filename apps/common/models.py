@@ -45,6 +45,22 @@ class BulkOperationJob(BaseModel):
         )
         POSITION_PRINT = "position_print", "Posiciones: imprimir"
         POSITION_DELETE = "position_delete", "Posiciones: eliminar"
+        ENTRY_REGENERATE_PDFS = (
+            "entry_regenerate_pdfs",
+            "Entradas: regenerar PDFs",
+        )
+        EXIT_REGENERATE_PDFS = (
+            "exit_regenerate_pdfs",
+            "Salidas: regenerar PDFs",
+        )
+        ENTRY_DELETE = (
+            "entry_delete",
+            "Entradas: eliminar",
+        )
+        EXIT_DELETE = (
+            "exit_delete",
+            "Salidas: eliminar",
+        )
 
     class Status(models.TextChoices):
         PENDING = "pending", "Pendiente"

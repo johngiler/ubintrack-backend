@@ -18,11 +18,24 @@ class EntryProductInline(admin.TabularInline):
     )
 
 
+class EntryDetailImageInline(admin.TabularInline):
+    model = models.EntryDetailImage
+    extra = 0
+    fields = ("image", "sort_order")
+
+
 class EntryDetailInline(admin.StackedInline):
     model = models.EntryDetail
-    fields = ('arrival_temperature', 'description',
-              'image_preview', 'image', 'pdf_document')
-    readonly_fields = ('image_preview',)
+    fields = (
+        "arrival_temperature",
+        "description",
+        "include_images_in_pdf",
+        "extra_fields",
+        "image_preview",
+        "image",
+        "pdf_document",
+    )
+    readonly_fields = ("image_preview",)
 
     def image_preview(self, obj):
         if obj.image:

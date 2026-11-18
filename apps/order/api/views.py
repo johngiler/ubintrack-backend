@@ -63,7 +63,9 @@ class EntryViewSet(ClientScopeMixin, viewsets.ModelViewSet):
             )
         )
         return (
-            qs.select_related("client", "storage", "entry_detail")
+            qs.select_related("client", "storage", "entry_detail").prefetch_related(
+                "entry_detail__images"
+            )
             .annotate(bins_count_annotated=Count("bins", distinct=True))
             .prefetch_related(Prefetch("entry_products", queryset=ep_qs))
             .distinct()
@@ -123,16 +125,21 @@ class EntryViewSet(ClientScopeMixin, viewsets.ModelViewSet):
         new_status = serializer.validated_data.get('status', instance.status)
 
         # Campos permitidos para editar en entradas completadas
-        campos_servicios = {'total_restibas',
-                            'total_wraps', 'total_added_pallets'}
+        campos_permitidos_completada = {
+            'total_restibas',
+            'total_wraps',
+            'total_added_pallets',
+            'condition',
+            'in_type',
+        }
 
-        # VALIDACIÓN: Si está completada, solo se pueden modificar campos de servicios
+        # VALIDACIÓN: Si está completada, solo servicios + flags condición/tipo
         if old_status == 'completada':
             campos_modificados = set(serializer.validated_data.keys())
-            campos_no_permitidos = campos_modificados - campos_servicios
+            campos_no_permitidos = campos_modificados - campos_permitidos_completada
             if campos_no_permitidos:
                 raise ValidationError({
-                    'status': 'Solo se pueden modificar los campos de servicios (restibas, wraps, pallets) en una entrada completada.'
+                    'status': 'No se pudo completar la operación.'
                 })
 
         # VALIDACIÓN: No se puede cancelar si tiene bins asociados
@@ -372,6 +379,207 @@ class EntryViewSet(ClientScopeMixin, viewsets.ModelViewSet):
             }
         })
 
+    BULK_MAX_IDS = 10000
+
+    def _parse_bulk_ids(self, request):
+        from rest_framework import status as http_status
+
+        raw = request.data.get("ids") or []
+        if not isinstance(raw, list) or not raw:
+            return None, Response(
+                {"detail": "Seleccione al menos una entrada."},
+                status=http_status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            ids = [int(value) for value in raw]
+        except (TypeError, ValueError):
+            return None, Response(
+                {"detail": "No se pudo completar la operación."},
+                status=http_status.HTTP_400_BAD_REQUEST,
+            )
+        if len(ids) > self.BULK_MAX_IDS:
+            return None, Response(
+                {"detail": f"Máximo {self.BULK_MAX_IDS} entradas por operación."},
+                status=http_status.HTTP_400_BAD_REQUEST,
+            )
+        return ids, None
+
+    @action(detail=False, methods=["get"])
+    def ids(self, request):
+        """IDs del listado filtrado (para seleccionar todas tras filtrar)."""
+        qs = self.filter_queryset(self.get_queryset())
+        total = qs.count()
+        id_list = list(qs.values_list("id", flat=True)[: self.BULK_MAX_IDS])
+        truncated = total > len(id_list)
+        payload = {
+            "ids": id_list,
+            "count": len(id_list),
+            "total": total,
+            "truncated": truncated,
+        }
+        if truncated:
+            payload["detail"] = (
+                f"Se seleccionaron {len(id_list)} de {total} "
+                f"(máximo {self.BULK_MAX_IDS} por operación)."
+            )
+        return Response(payload)
+
+    @action(detail=False, methods=["post"], url_path="bulk-regenerate-pdfs")
+    def bulk_regenerate_pdfs(self, request):
+        """Regenera PDFs de entradas (1 sync; ≥2 Celery)."""
+        from rest_framework import status as http_status
+
+        from apps.common.models import BulkOperationJob
+        from apps.common.tasks import run_bulk_operation_job
+        from apps.common.utils.bulk_jobs import (
+            BulkJobInProgress,
+            USER_DETAIL_ASYNC,
+            serialize_bulk_job,
+            start_bulk_operation,
+        )
+        from apps.order.services_bulk import run_entry_regenerate_pdfs
+        from apps.workspaces.utils.tenant import get_workspace_for_request
+
+        if is_client_user(request.user):
+            return Response(
+                {"detail": "No autorizado."},
+                status=http_status.HTTP_403_FORBIDDEN,
+            )
+
+        ids, error = self._parse_bulk_ids(request)
+        if error is not None:
+            return error
+
+        ws = get_workspace_for_request(request)
+        if ws is None:
+            return Response(
+                {"detail": "No se pudo completar la operación."},
+                status=http_status.HTTP_400_BAD_REQUEST,
+            )
+
+        scoped_ids = list(
+            self.scope_to_user(
+                order_models.Entry.objects.filter(
+                    id__in=ids,
+                    client__workspace=ws,
+                )
+            )
+            .distinct()
+            .values_list("id", flat=True)
+        )
+        if not scoped_ids:
+            return Response(
+                {"detail": "No se encontraron entradas."},
+                status=http_status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            job, ran_async = start_bulk_operation(
+                workspace=ws,
+                kind=BulkOperationJob.Kind.ENTRY_REGENERATE_PDFS,
+                item_ids=scoped_ids,
+                runner=run_entry_regenerate_pdfs,
+                celery_task=run_bulk_operation_job,
+            )
+        except BulkJobInProgress:
+            return Response(
+                {"detail": USER_DETAIL_ASYNC},
+                status=http_status.HTTP_409_CONFLICT,
+            )
+        payload = serialize_bulk_job(job, async_=ran_async)
+        if ran_async:
+            return Response(payload, status=http_status.HTTP_202_ACCEPTED)
+        if job.status == BulkOperationJob.Status.FAILED:
+            return Response(payload, status=http_status.HTTP_400_BAD_REQUEST)
+        return Response(payload)
+
+    @action(detail=False, methods=["delete"], url_path="bulk-delete")
+    def bulk_delete(self, request):
+        """Elimina entradas (1 sync; ≥2 Celery). Rechaza el lote si alguna no es válida."""
+        from django.db.models import Count, Q
+        from rest_framework import status as http_status
+
+        from apps.common.models import BulkOperationJob
+        from apps.common.tasks import run_bulk_operation_job
+        from apps.common.utils.bulk_jobs import (
+            BulkJobInProgress,
+            USER_DETAIL_ASYNC,
+            serialize_bulk_job,
+            start_bulk_operation,
+        )
+        from apps.order.services_bulk import run_entry_delete
+        from apps.workspaces.utils.tenant import get_workspace_for_request
+
+        if is_client_user(request.user):
+            return Response(
+                {"detail": "No autorizado."},
+                status=http_status.HTTP_403_FORBIDDEN,
+            )
+
+        ids, error = self._parse_bulk_ids(request)
+        if error is not None:
+            return error
+
+        ws = get_workspace_for_request(request)
+        if ws is None:
+            return Response(
+                {"detail": "No se pudo completar la operación."},
+                status=http_status.HTTP_400_BAD_REQUEST,
+            )
+
+        scoped_qs = self.scope_to_user(
+            order_models.Entry.objects.filter(
+                id__in=ids,
+                client__workspace=ws,
+            )
+        ).distinct()
+        scoped_ids = list(scoped_qs.values_list("id", flat=True))
+        if not scoped_ids:
+            return Response(
+                {"detail": "No se encontraron entradas."},
+                status=http_status.HTTP_400_BAD_REQUEST,
+            )
+        if len(scoped_ids) != len(set(ids)):
+            return Response(
+                {"detail": "No se pudo completar la operación."},
+                status=http_status.HTTP_400_BAD_REQUEST,
+            )
+
+        if (
+            scoped_qs.annotate(_bins=Count("bins"))
+            .filter(Q(status="completada") | Q(_bins__gt=0))
+            .exists()
+        ):
+            return Response(
+                {
+                    "detail": (
+                        "Hay entradas que no se pueden eliminar "
+                        "(completadas o con bins)."
+                    )
+                },
+                status=http_status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            job, ran_async = start_bulk_operation(
+                workspace=ws,
+                kind=BulkOperationJob.Kind.ENTRY_DELETE,
+                item_ids=scoped_ids,
+                runner=run_entry_delete,
+                celery_task=run_bulk_operation_job,
+            )
+        except BulkJobInProgress:
+            return Response(
+                {"detail": USER_DETAIL_ASYNC},
+                status=http_status.HTTP_409_CONFLICT,
+            )
+        payload = serialize_bulk_job(job, async_=ran_async)
+        if ran_async:
+            return Response(payload, status=http_status.HTTP_202_ACCEPTED)
+        if job.status == BulkOperationJob.Status.FAILED:
+            return Response(payload, status=http_status.HTTP_400_BAD_REQUEST)
+        return Response(payload)
+
     @action(detail=True, methods=['post'])
     def regenerate_pdf(self, request, pk=None):
         """
@@ -610,7 +818,6 @@ class ExitViewSet(ClientScopeMixin, viewsets.ModelViewSet):
             resource_code=exit_order.code,
         )
 
-    # Eliminar la primera versión duplicada de perform_update y consolidar lógica aquí
     def perform_update(self, serializer):
         from rest_framework.exceptions import ValidationError
 
@@ -621,11 +828,19 @@ class ExitViewSet(ClientScopeMixin, viewsets.ModelViewSet):
         # Estado candidato
         new_status = serializer.validated_data.get('status', instance.status)
 
-        # VALIDACIÓN: No se puede modificar una salida completada
+        # Campos permitidos para editar en salidas completadas
+        campos_permitidos_completada = {
+            'out_type',
+        }
+
+        # VALIDACIÓN: Si está completada, solo tipo de salida
         if old_status == 'completada':
-            raise ValidationError({
-                'status': 'No se puede modificar una salida completada.'
-            })
+            campos_modificados = set(serializer.validated_data.keys())
+            campos_no_permitidos = campos_modificados - campos_permitidos_completada
+            if campos_no_permitidos:
+                raise ValidationError({
+                    'status': 'No se pudo completar la operación.'
+                })
 
         # VALIDACIÓN: No se puede cancelar si tiene bins procesados
         if new_status == 'cancelada' and old_status != 'cancelada':
@@ -836,6 +1051,247 @@ class ExitViewSet(ClientScopeMixin, viewsets.ModelViewSet):
                 'pdf_url': pdf_url
             }
         })
+
+    BULK_MAX_IDS = 10000
+
+    def _parse_bulk_ids(self, request):
+        from rest_framework import status as http_status
+
+        raw = request.data.get("ids") or []
+        if not isinstance(raw, list) or not raw:
+            return None, Response(
+                {"detail": "Seleccione al menos una salida."},
+                status=http_status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            ids = [int(value) for value in raw]
+        except (TypeError, ValueError):
+            return None, Response(
+                {"detail": "No se pudo completar la operación."},
+                status=http_status.HTTP_400_BAD_REQUEST,
+            )
+        if len(ids) > self.BULK_MAX_IDS:
+            return None, Response(
+                {"detail": f"Máximo {self.BULK_MAX_IDS} salidas por operación."},
+                status=http_status.HTTP_400_BAD_REQUEST,
+            )
+        return ids, None
+
+    @action(detail=False, methods=["get"])
+    def ids(self, request):
+        """IDs del listado filtrado (para seleccionar todas tras filtrar)."""
+        qs = self.filter_queryset(self.get_queryset())
+        total = qs.count()
+        id_list = list(qs.values_list("id", flat=True)[: self.BULK_MAX_IDS])
+        truncated = total > len(id_list)
+        payload = {
+            "ids": id_list,
+            "count": len(id_list),
+            "total": total,
+            "truncated": truncated,
+        }
+        if truncated:
+            payload["detail"] = (
+                f"Se seleccionaron {len(id_list)} de {total} "
+                f"(máximo {self.BULK_MAX_IDS} por operación)."
+            )
+        return Response(payload)
+
+    @action(detail=False, methods=["post"], url_path="bulk-regenerate-pdfs")
+    def bulk_regenerate_pdfs(self, request):
+        """Regenera PDFs de salidas (1 sync; ≥2 Celery)."""
+        from rest_framework import status as http_status
+
+        from apps.common.models import BulkOperationJob
+        from apps.common.tasks import run_bulk_operation_job
+        from apps.common.utils.bulk_jobs import (
+            BulkJobInProgress,
+            USER_DETAIL_ASYNC,
+            serialize_bulk_job,
+            start_bulk_operation,
+        )
+        from apps.order.services_bulk import run_exit_regenerate_pdfs
+        from apps.workspaces.utils.tenant import get_workspace_for_request
+
+        if is_client_user(request.user):
+            return Response(
+                {"detail": "No autorizado."},
+                status=http_status.HTTP_403_FORBIDDEN,
+            )
+
+        ids, error = self._parse_bulk_ids(request)
+        if error is not None:
+            return error
+
+        ws = get_workspace_for_request(request)
+        if ws is None:
+            return Response(
+                {"detail": "No se pudo completar la operación."},
+                status=http_status.HTTP_400_BAD_REQUEST,
+            )
+
+        scoped_ids = list(
+            self.scope_to_user(
+                order_models.Exit.objects.filter(
+                    id__in=ids,
+                    client__workspace=ws,
+                )
+            )
+            .distinct()
+            .values_list("id", flat=True)
+        )
+        if not scoped_ids:
+            return Response(
+                {"detail": "No se encontraron salidas."},
+                status=http_status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            job, ran_async = start_bulk_operation(
+                workspace=ws,
+                kind=BulkOperationJob.Kind.EXIT_REGENERATE_PDFS,
+                item_ids=scoped_ids,
+                runner=run_exit_regenerate_pdfs,
+                celery_task=run_bulk_operation_job,
+            )
+        except BulkJobInProgress:
+            return Response(
+                {"detail": USER_DETAIL_ASYNC},
+                status=http_status.HTTP_409_CONFLICT,
+            )
+        payload = serialize_bulk_job(job, async_=ran_async)
+        if ran_async:
+            return Response(payload, status=http_status.HTTP_202_ACCEPTED)
+        if job.status == BulkOperationJob.Status.FAILED:
+            return Response(payload, status=http_status.HTTP_400_BAD_REQUEST)
+        return Response(payload)
+
+    @action(detail=False, methods=["delete"], url_path="bulk-delete")
+    def bulk_delete(self, request):
+        """Elimina salidas (1 sync; ≥2 Celery). Rechaza el lote si alguna no es válida."""
+        from django.db.models import Exists, OuterRef
+        from rest_framework import status as http_status
+
+        from apps.common.models import BulkOperationJob
+        from apps.common.tasks import run_bulk_operation_job
+        from apps.common.utils.bulk_jobs import (
+            BulkJobInProgress,
+            USER_DETAIL_ASYNC,
+            serialize_bulk_job,
+            start_bulk_operation,
+        )
+        from apps.order.services_bulk import run_exit_delete
+        from apps.workspaces.utils.tenant import get_workspace_for_request
+
+        if is_client_user(request.user):
+            return Response(
+                {"detail": "No autorizado."},
+                status=http_status.HTTP_403_FORBIDDEN,
+            )
+
+        ids, error = self._parse_bulk_ids(request)
+        if error is not None:
+            return error
+
+        ws = get_workspace_for_request(request)
+        if ws is None:
+            return Response(
+                {"detail": "No se pudo completar la operación."},
+                status=http_status.HTTP_400_BAD_REQUEST,
+            )
+
+        scoped_qs = self.scope_to_user(
+            order_models.Exit.objects.filter(
+                id__in=ids,
+                client__workspace=ws,
+            )
+        ).distinct()
+        scoped_ids = list(scoped_qs.values_list("id", flat=True))
+        if not scoped_ids:
+            return Response(
+                {"detail": "No se encontraron salidas."},
+                status=http_status.HTTP_400_BAD_REQUEST,
+            )
+        if len(scoped_ids) != len(set(ids)):
+            return Response(
+                {"detail": "No se pudo completar la operación."},
+                status=http_status.HTTP_400_BAD_REQUEST,
+            )
+        processed = order_models.ExitProduct.objects.filter(
+            exit_product_group__exit_id=OuterRef("pk"),
+            is_processed=True,
+        )
+        invalid = (
+            scoped_qs.filter(status="completada").exists()
+            or scoped_qs.filter(Exists(processed)).exists()
+        )
+        if invalid:
+            return Response(
+                {
+                    "detail": (
+                        "Hay salidas que no se pueden eliminar "
+                        "(completadas o con bins procesados)."
+                    )
+                },
+                status=http_status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            job, ran_async = start_bulk_operation(
+                workspace=ws,
+                kind=BulkOperationJob.Kind.EXIT_DELETE,
+                item_ids=scoped_ids,
+                runner=run_exit_delete,
+                celery_task=run_bulk_operation_job,
+            )
+        except BulkJobInProgress:
+            return Response(
+                {"detail": USER_DETAIL_ASYNC},
+                status=http_status.HTTP_409_CONFLICT,
+            )
+        payload = serialize_bulk_job(job, async_=ran_async)
+        if ran_async:
+            return Response(payload, status=http_status.HTTP_202_ACCEPTED)
+        if job.status == BulkOperationJob.Status.FAILED:
+            return Response(payload, status=http_status.HTTP_400_BAD_REQUEST)
+        return Response(payload)
+
+    @action(detail=True, methods=['post'])
+    def regenerate_pdf(self, request, pk=None):
+        """
+        Regenerar el PDF de una salida de forma síncrona.
+        """
+        from apps.order.services import update_exit_pdf
+        from apps.order.models import ExitDetail
+
+        exit_obj = self.get_object()
+
+        try:
+            exit_obj.refresh_from_db()
+
+            try:
+                exit_detail = exit_obj.exit_detail
+            except ExitDetail.DoesNotExist:
+                exit_detail = ExitDetail.objects.create(exit=exit_obj)
+
+            pdf_path = update_exit_pdf(exit_obj)
+            if pdf_path:
+                exit_detail.pdf_document = pdf_path
+                exit_detail.save(update_fields=['pdf_document'])
+                return Response({
+                    'detail': 'PDF regenerado exitosamente.',
+                    'pdf_url': pdf_path
+                })
+            else:
+                return Response(
+                    {'detail': 'No se pudo generar el PDF.'},
+                    status=400
+                )
+        except Exception as e:
+            return Response(
+                {'detail': f'Error al regenerar PDF: {str(e)}'},
+                status=500
+            )
 
     @action(detail=False, methods=['get'])
     def export_excel(self, request):

@@ -107,24 +107,193 @@ class EntryProductSimpleSerializer(serializers.ModelSerializer):
         return representation
 
 
+class EntryDetailImageSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = order_models.EntryDetailImage
+        fields = ["id", "image", "sort_order"]
+
+
+def _parse_extra_fields(raw):
+    """Normaliza extra_fields desde JSON string o lista."""
+    import json
+
+    if raw is None or raw == "":
+        return []
+    if isinstance(raw, (list, tuple)):
+        data = list(raw)
+    elif isinstance(raw, str):
+        try:
+            data = json.loads(raw)
+        except (TypeError, ValueError):
+            raise serializers.ValidationError(
+                {"extra_fields": "Formato inválido."}
+            )
+    else:
+        raise serializers.ValidationError({"extra_fields": "Formato inválido."})
+    if not isinstance(data, list):
+        raise serializers.ValidationError({"extra_fields": "Debe ser una lista."})
+    # Compat: tipos viejos → nuevos
+    legacy_map = {
+        "text": "normal",
+        "number": "normal",
+        "date": "normal",
+        "valor": "normal",
+        "textarea": "texto",
+        "bool": "check",
+        "boolean": "check",
+    }
+    cleaned = []
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "").strip()
+        if not name:
+            continue
+        field_type = str(item.get("type") or "normal").strip().lower()
+        field_type = legacy_map.get(field_type, field_type)
+        if field_type not in ("normal", "check", "texto"):
+            field_type = "normal"
+        value = item.get("value")
+        if field_type == "check":
+            if isinstance(value, bool):
+                value = value
+            elif isinstance(value, str):
+                value = value.strip().lower() in ("1", "true", "yes", "on", "sí", "si")
+            else:
+                value = bool(value)
+        else:
+            if value is None:
+                value = ""
+            else:
+                value = str(value)
+            if field_type == "normal":
+                value = value[:60]
+            elif field_type == "texto":
+                # Hasta ~6 líneas (cortar por saltos o longitud razonable)
+                lines = value.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+                value = "\n".join(lines[:6])
+        cleaned.append({"name": name, "type": field_type, "value": value})
+    return cleaned
+
+
 class EntryDetailSerializer(serializers.ModelSerializer):
     entry_id = serializers.PrimaryKeyRelatedField(
         queryset=order_models.Entry.objects.all(),
         source='entry',
         write_only=True
     )
+    images = EntryDetailImageSerializer(many=True, read_only=True)
+    delete_image_ids = serializers.CharField(
+        required=False, allow_blank=True, write_only=True
+    )
 
     class Meta:
         model = order_models.EntryDetail
         exclude = ('created_by', 'updated_by')
-        extra_kwargs = {'entry': {'read_only': True}}
+        extra_kwargs = {
+            'entry': {'read_only': True},
+            'image': {'required': False, 'allow_null': True},
+        }
+
+    def to_internal_value(self, data):
+        # QueryDict / multipart: normalizar booleanos y temperatura vacía
+        mutable = data
+        try:
+            if hasattr(data, "copy"):
+                mutable = data.copy()
+        except Exception:
+            mutable = data
+        if hasattr(mutable, "get"):
+            flag = mutable.get("include_images_in_pdf")
+            if isinstance(flag, str):
+                mutable["include_images_in_pdf"] = flag.strip().lower() in (
+                    "1",
+                    "true",
+                    "yes",
+                    "on",
+                )
+            temp = mutable.get("arrival_temperature")
+            if temp == "":
+                mutable["arrival_temperature"] = None
+            extras = mutable.get("extra_fields")
+            if extras is not None and extras != "" and not isinstance(extras, (list, dict)):
+                # Dejar string JSON para validate_extra_fields
+                pass
+        return super().to_internal_value(mutable)
+
+    def validate_extra_fields(self, value):
+        return _parse_extra_fields(value)
+
+    def validate_arrival_temperature(self, value):
+        if value == "" or value is None:
+            return None
+        return value
+
+    def create(self, validated_data):
+        validated_data.pop("delete_image_ids", None)
+        request = self.context.get("request")
+        detail = super().create(validated_data)
+        self._apply_uploaded_images(detail, request)
+        return detail
+
+    def update(self, instance, validated_data):
+        delete_raw = validated_data.pop("delete_image_ids", "")
+        request = self.context.get("request")
+        detail = super().update(instance, validated_data)
+        self._delete_images(detail, delete_raw)
+        self._apply_uploaded_images(detail, request)
+        if not detail.images.exists() and not detail.image:
+            if detail.include_images_in_pdf:
+                detail.include_images_in_pdf = False
+                detail.save(update_fields=["include_images_in_pdf"])
+        return detail
+
+    def _delete_images(self, detail, delete_raw):
+        if not delete_raw:
+            return
+        ids = []
+        for part in str(delete_raw).split(","):
+            part = part.strip()
+            if part.isdigit():
+                ids.append(int(part))
+        if not ids:
+            return
+        detail.images.filter(id__in=ids).delete()
+
+    def _apply_uploaded_images(self, detail, request):
+        if request is None or not hasattr(request, "FILES"):
+            return
+        files = request.FILES.getlist("images") or request.FILES.getlist("images[]")
+        # Compat: una sola "image" nueva → galería
+        single = request.FILES.get("image")
+        if single and not files:
+            files = [single]
+        if not files:
+            return
+        start = detail.images.count()
+        for idx, uploaded in enumerate(files):
+            order_models.EntryDetailImage.objects.create(
+                entry_detail=detail,
+                image=uploaded,
+                sort_order=start + idx,
+            )
 
 
 class EntryDetailSimpleSerializer(serializers.ModelSerializer):
+    images = EntryDetailImageSerializer(many=True, read_only=True)
+
     class Meta:
         model = order_models.EntryDetail
-        fields = ['id', 'arrival_temperature',
-                  'description', 'image', 'pdf_document']
+        fields = [
+            "id",
+            "arrival_temperature",
+            "description",
+            "image",
+            "images",
+            "include_images_in_pdf",
+            "extra_fields",
+            "pdf_document",
+        ]
 
 
 class StorageSimpleSerializer(serializers.ModelSerializer):

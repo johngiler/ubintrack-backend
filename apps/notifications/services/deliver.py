@@ -440,6 +440,52 @@ def notify_bins_bulk(
     )
 
 
+def notify_entries_bulk(
+    *,
+    workspace,
+    event: str,
+    message: str,
+    count: int,
+    actor=None,
+    activity_action: str = "",
+) -> list[Notification]:
+    if count <= 0 or workspace is None:
+        return []
+    return broadcast_workspace_staff(
+        workspace=workspace,
+        event=event,
+        artifact=Notification.Artifact.ENTRY,
+        target=Notification.Target.ENTRIES_LIST,
+        message=message,
+        actor=actor,
+        activity_action=activity_action,
+        affected_count=count,
+    )
+
+
+def notify_exits_bulk(
+    *,
+    workspace,
+    event: str,
+    message: str,
+    count: int,
+    actor=None,
+    activity_action: str = "",
+) -> list[Notification]:
+    if count <= 0 or workspace is None:
+        return []
+    return broadcast_workspace_staff(
+        workspace=workspace,
+        event=event,
+        artifact=Notification.Artifact.EXIT,
+        target=Notification.Target.EXITS_LIST,
+        message=message,
+        actor=actor,
+        activity_action=activity_action,
+        affected_count=count,
+    )
+
+
 # --- Posiciones (manual; nunca cascadas desde bins) ---
 
 
@@ -843,6 +889,106 @@ def notify_bulk_job_finished(job) -> list[Notification]:
             count=count,
             actor=actor,
             activity_action="bulk_regenerate",
+        )
+
+    if kind == BulkOperationJob.Kind.ENTRY_REGENERATE_PDFS:
+        count = int(result.get("regenerated") or 0)
+        if not count:
+            return []
+        noun = _plural(count, "PDF de entrada", "PDFs de entrada")
+        message = f"{_actor_label(actor)} regeneró {count} {noun}"
+        if items:
+            log_bulk(
+                workspace=workspace,
+                section=ActivitySection.ENTRY,
+                action="bulk_regenerate",
+                kind=ActivityBatch.Kind.BULK_REGENERATE,
+                summary=message,
+                items=items,
+                actor=actor,
+            )
+        return notify_entries_bulk(
+            workspace=workspace,
+            event=Notification.Event.UPDATED,
+            message=message,
+            count=count,
+            actor=actor,
+            activity_action="bulk_regenerate",
+        )
+
+    if kind == BulkOperationJob.Kind.EXIT_REGENERATE_PDFS:
+        count = int(result.get("regenerated") or 0)
+        if not count:
+            return []
+        noun = _plural(count, "PDF de salida", "PDFs de salida")
+        message = f"{_actor_label(actor)} regeneró {count} {noun}"
+        if items:
+            log_bulk(
+                workspace=workspace,
+                section=ActivitySection.EXIT,
+                action="bulk_regenerate",
+                kind=ActivityBatch.Kind.BULK_REGENERATE,
+                summary=message,
+                items=items,
+                actor=actor,
+            )
+        return notify_exits_bulk(
+            workspace=workspace,
+            event=Notification.Event.UPDATED,
+            message=message,
+            count=count,
+            actor=actor,
+            activity_action="bulk_regenerate",
+        )
+
+    if kind == BulkOperationJob.Kind.ENTRY_DELETE:
+        count = int(result.get("deleted") or 0)
+        if not count:
+            return []
+        noun = _plural(count, "entrada", "entradas")
+        message = f"{_actor_label(actor)} eliminó {count} {noun}"
+        if items:
+            log_bulk(
+                workspace=workspace,
+                section=ActivitySection.ENTRY,
+                action="bulk_delete",
+                kind=ActivityBatch.Kind.BULK_DELETE,
+                summary=message,
+                items=items,
+                actor=actor,
+            )
+        return notify_entries_bulk(
+            workspace=workspace,
+            event=Notification.Event.DELETED,
+            message=message,
+            count=count,
+            actor=actor,
+            activity_action="bulk_delete",
+        )
+
+    if kind == BulkOperationJob.Kind.EXIT_DELETE:
+        count = int(result.get("deleted") or 0)
+        if not count:
+            return []
+        noun = _plural(count, "salida", "salidas")
+        message = f"{_actor_label(actor)} eliminó {count} {noun}"
+        if items:
+            log_bulk(
+                workspace=workspace,
+                section=ActivitySection.EXIT,
+                action="bulk_delete",
+                kind=ActivityBatch.Kind.BULK_DELETE,
+                summary=message,
+                items=items,
+                actor=actor,
+            )
+        return notify_exits_bulk(
+            workspace=workspace,
+            event=Notification.Event.DELETED,
+            message=message,
+            count=count,
+            actor=actor,
+            activity_action="bulk_delete",
         )
 
     return []

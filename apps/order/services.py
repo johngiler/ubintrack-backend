@@ -1141,10 +1141,11 @@ def generate_exit_pdf(exit_instance):
     workspace = getattr(exit_instance.client, "workspace", None)
     owner_label = workspace_display_name(workspace)
 
-    append_workspace_logo(elements, workspace, styles["CenterTitle"], size=1.5)
+    # Logo arriba; si hay logo, no se muestra el nombre del owner.
+    append_workspace_logo(elements, workspace, styles["CenterTitle"], size=1.35)
 
     # Título
-    elements.append(Spacer(1, 0.75*inch))
+    elements.append(Spacer(1, 0.2 * inch))
     elements.append(
         Paragraph("GERENCIA DE OPERACIONES", styles["CenterTitle"]))
     elements.append(Paragraph("DOCUMENTO DE SALIDA", styles["CenterTitle"]))
@@ -1438,41 +1439,119 @@ def generate_entry_pdf(entry_instance):
     workspace = getattr(entry_instance.client, "workspace", None)
     owner_label = workspace_display_name(workspace)
 
-    append_workspace_logo(elements, workspace, styles["CenterTitle"], size=1.5)
+    # Logo arriba; si hay logo, no se muestra el nombre del owner.
+    append_workspace_logo(elements, workspace, styles["CenterTitle"], size=1.35)
 
     # Título
-    elements.append(Spacer(1, 0.75*inch))
+    elements.append(Spacer(1, 0.2 * inch))
     elements.append(
         Paragraph("GERENCIA DE OPERACIONES", styles["CenterTitle"]))
     elements.append(Paragraph("DOCUMENTO DE ENTRADA", styles["CenterTitle"]))
     elements.append(Spacer(1, 0.25*inch))
 
-    # Información de la entrada
-    # Determinar la fecha - prioridad: entry_date, created_at, N/A
+    # Información de la entrada (izq) + campos extras (der, si hay)
     if entry_instance.entry_date:
         fecha_entrada = entry_instance.entry_date.strftime("%d/%m/%Y")
     elif entry_instance.created_at:
         fecha_entrada = entry_instance.created_at.strftime("%d/%m/%Y")
     else:
         fecha_entrada = "N/A"
-    elements.append(
-        Paragraph(f"<b>Fecha de Entrada:</b> {fecha_entrada}", styles["LeftHeading"]))
-    elements.append(
-        Paragraph(f"<b>Código de Entrada:</b> {entry_instance.code}", styles["LeftHeading"]))
-    elements.append(
-        Paragraph(f"<b>Cliente:</b> {entry_instance.client.name}", styles["LeftHeading"]))
 
+    left_meta = [
+        Paragraph(f"<b>Fecha de Entrada:</b> {fecha_entrada}", styles["LeftHeading"]),
+        Paragraph(f"<b>Código de Entrada:</b> {entry_instance.code}", styles["LeftHeading"]),
+        Paragraph(f"<b>Cliente:</b> {entry_instance.client.name}", styles["LeftHeading"]),
+    ]
     if entry_instance.storage:
-        elements.append(
-            Paragraph(f"<b>Almacén:</b> {entry_instance.storage.name}", styles["LeftHeading"]))
-
+        left_meta.append(
+            Paragraph(f"<b>Almacén:</b> {entry_instance.storage.name}", styles["LeftHeading"])
+        )
     if entry_instance.condition:
-        elements.append(
-            Paragraph(f"<b>Condición:</b> {entry_instance.get_condition_display()}", styles["LeftHeading"]))
-
+        left_meta.append(
+            Paragraph(
+                f"<b>Condición:</b> {entry_instance.get_condition_display()}",
+                styles["LeftHeading"],
+            )
+        )
     if entry_instance.in_type:
+        left_meta.append(
+            Paragraph(
+                f"<b>Tipo de Entrada:</b> {entry_instance.get_in_type_display()}",
+                styles["LeftHeading"],
+            )
+        )
+
+    # Extras: valor/check → columna derecha; texto → debajo de cabecera (fila propia)
+    right_extras = []
+    texto_extras = []
+    try:
+        detail = getattr(entry_instance, "entry_detail", None)
+        raw_extras = getattr(detail, "extra_fields", None) if detail else None
+        if isinstance(raw_extras, list):
+            for item in raw_extras:
+                if not isinstance(item, dict):
+                    continue
+                name = str(item.get("name") or "").strip()
+                if not name:
+                    continue
+                field_type = str(item.get("type") or "normal").strip().lower()
+                if field_type in ("text", "number", "date", "valor"):
+                    field_type = "normal"
+                if field_type in ("textarea",):
+                    field_type = "texto"
+                if field_type in ("bool", "boolean"):
+                    field_type = "check"
+                value = item.get("value")
+                if field_type == "check":
+                    checked = value is True or str(value).strip().lower() in (
+                        "1", "true", "yes", "on", "sí", "si",
+                    )
+                    right_extras.append((name, "Sí" if checked else "No"))
+                elif field_type == "texto":
+                    text_val = str(value or "").strip()
+                    if text_val:
+                        texto_extras.append((name, text_val))
+                else:
+                    text_val = str(value or "").strip()
+                    if text_val:
+                        right_extras.append((name, text_val[:60]))
+    except Exception:
+        right_extras = []
+        texto_extras = []
+
+    if right_extras:
+        right_meta = [
+            Paragraph(f"<b>{name}:</b> {value}", styles["LeftHeading"])
+            for name, value in right_extras
+        ]
+        meta_table = Table(
+            [[left_meta, right_meta]],
+            colWidths=[3.5 * inch, 3.5 * inch],
+        )
+        meta_table.setStyle(TableStyle([
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 0),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+            ("TOPPADDING", (0, 0), (-1, -1), 0),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+        ]))
+        elements.append(meta_table)
+    else:
+        elements.extend(left_meta)
+
+    for name, text_val in texto_extras:
+        elements.append(Spacer(1, 0.12 * inch))
         elements.append(
-            Paragraph(f"<b>Tipo de Entrada:</b> {entry_instance.get_in_type_display()}", styles["LeftHeading"]))
+            Paragraph(f"<b>{name}:</b>", styles["LeftHeading"])
+        )
+        # Conservar saltos de línea (máx. 6 ya validados al guardar)
+        safe = (
+            text_val.replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+            .replace("\n", "<br/>")
+        )
+        elements.append(Paragraph(safe, styles["LeftHeading"]))
 
     elements.append(Spacer(1, 0.25*inch))
 
@@ -1628,6 +1707,64 @@ def generate_entry_pdf(entry_instance):
         elements.append(Spacer(1, 0.75*inch))
         elements.extend(footer)
 
+    # Imágenes al final del documento (si el check está activo)
+    try:
+        detail = getattr(entry_instance, "entry_detail", None)
+        if detail and getattr(detail, "include_images_in_pdf", False):
+            from io import BytesIO as _BytesIO
+
+            from reportlab.platypus import Image as RLImage
+
+            img_flowables = []
+            for field in detail.iter_report_images():
+                try:
+                    with field.open("rb") as fh:
+                        raw = fh.read()
+                    if not raw:
+                        continue
+                    buf = _BytesIO(raw)
+                    img = RLImage(buf)
+                    max_w = 3.2 * inch
+                    max_h = 3.2 * inch
+                    iw = float(getattr(img, "imageWidth", max_w) or max_w)
+                    ih = float(getattr(img, "imageHeight", max_h) or max_h)
+                    scale = min(max_w / iw, max_h / ih, 1.0)
+                    img.drawWidth = iw * scale
+                    img.drawHeight = ih * scale
+                    img_flowables.append(img)
+                except Exception:
+                    continue
+            if img_flowables:
+                elements.append(Spacer(1, 0.4 * inch))
+                elements.append(
+                    Paragraph("<b>Imágenes adjuntas</b>", styles["LeftHeading"])
+                )
+                elements.append(Spacer(1, 0.15 * inch))
+                # Pares en fila
+                row = []
+                rows = []
+                for img in img_flowables:
+                    row.append(img)
+                    if len(row) == 2:
+                        rows.append(row)
+                        row = []
+                if row:
+                    while len(row) < 2:
+                        row.append("")
+                    rows.append(row)
+                gallery = Table(rows, colWidths=[3.5 * inch, 3.5 * inch])
+                gallery.setStyle(TableStyle([
+                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                    ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 4),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+                    ("TOPPADDING", (0, 0), (-1, -1), 6),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+                ]))
+                elements.append(gallery)
+    except Exception:
+        pass
+
     # Generar PDF
     doc.build(elements)
 
@@ -1649,6 +1786,20 @@ def update_entry_pdf(entry_instance):
     Returns:
         str: Ruta del archivo PDF generado
     """
+    from apps.order.models import Entry
+
+    entry_instance = (
+        Entry.objects.select_related("client__workspace", "storage", "entry_detail")
+        .prefetch_related(
+            "entry_products__product",
+            "entry_detail__images",
+            "bins",
+        )
+        .filter(pk=entry_instance.pk)
+        .first()
+        or entry_instance
+    )
+
     # Intentar generar el PDF con reintentos
     max_retries = 3
     retry_delay = 1  # segundos
