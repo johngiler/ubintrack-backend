@@ -27,10 +27,22 @@ from apps.common.utils.media_layout import (
     ensure_media_parent_dir,
 )
 from apps.common.utils.pdf_branding import (
-    append_workspace_logo,
+    ORDER_PDF_BORDER,
+    ORDER_PDF_BORDER_WIDTH,
+    append_order_document_header,
+    split_extra_fields_for_pdf,
     workspace_display_name,
     workspace_pdf_footer_paragraphs,
 )
+
+# Fracciones del ancho útil del documento (doc.width)
+_ENTRY_PRODUCT_COL_RATIOS = (2.35, 1.45, 0.7, 0.7, 0.95, 0.85)
+_EXIT_PRODUCT_COL_RATIOS = (3.1, 2.0, 0.95, 0.95)
+
+
+def _pdf_col_widths(total_width, ratios):
+    total = float(sum(ratios)) or 1.0
+    return [float(total_width) * (r / total) for r in ratios]
 
 
 class TransactionError(Exception):
@@ -1141,17 +1153,6 @@ def generate_exit_pdf(exit_instance):
     workspace = getattr(exit_instance.client, "workspace", None)
     owner_label = workspace_display_name(workspace)
 
-    # Logo arriba; si hay logo, no se muestra el nombre del owner.
-    append_workspace_logo(elements, workspace, styles["CenterTitle"], size=1.35)
-
-    # Título
-    elements.append(Spacer(1, 0.2 * inch))
-    elements.append(
-        Paragraph("GERENCIA DE OPERACIONES", styles["CenterTitle"]))
-    elements.append(Paragraph("DOCUMENTO DE SALIDA", styles["CenterTitle"]))
-    elements.append(Spacer(1, 0.25*inch))
-
-    # Información de la salida (izq) + extras normal/check (der); texto debajo
     if exit_instance.exit_date:
         fecha_salida = exit_instance.exit_date.strftime("%d/%m/%Y")
     elif exit_instance.created_at:
@@ -1159,95 +1160,36 @@ def generate_exit_pdf(exit_instance):
     else:
         fecha_salida = "N/A"
 
-    left_meta = [
-        Paragraph(f"<b>Fecha de Salida:</b> {fecha_salida}", styles["LeftHeading"]),
-        Paragraph(f"<b>Código de Salida:</b> {exit_instance.code}", styles["LeftHeading"]),
-        Paragraph(f"<b>Cliente:</b> {exit_instance.client.name}", styles["LeftHeading"]),
+    left_rows = [
+        ("Fecha de Salida", fecha_salida),
+        ("Código de Salida", exit_instance.code),
+        ("Cliente", exit_instance.client.name),
     ]
     if hasattr(exit_instance, "branch") and exit_instance.branch:
-        left_meta.append(
-            Paragraph(f"<b>Sucursal:</b> {exit_instance.branch.name}", styles["LeftHeading"])
-        )
+        left_rows.append(("Sucursal", exit_instance.branch.name))
     if getattr(exit_instance, "out_type", None):
         try:
-            left_meta.append(
-                Paragraph(
-                    f"<b>Tipo de Salida:</b> {exit_instance.get_out_type_display()}",
-                    styles["LeftHeading"],
-                )
-            )
+            left_rows.append(("Tipo de Salida", exit_instance.get_out_type_display()))
         except Exception:
             pass
 
-    right_extras = []
-    texto_extras = []
     try:
         detail = getattr(exit_instance, "exit_detail", None)
         raw_extras = getattr(detail, "extra_fields", None) if detail else None
-        if isinstance(raw_extras, list):
-            for item in raw_extras:
-                if not isinstance(item, dict):
-                    continue
-                name = str(item.get("name") or "").strip()
-                if not name:
-                    continue
-                field_type = str(item.get("type") or "normal").strip().lower()
-                if field_type in ("text", "number", "date", "valor"):
-                    field_type = "normal"
-                if field_type in ("textarea",):
-                    field_type = "texto"
-                if field_type in ("bool", "boolean"):
-                    field_type = "check"
-                value = item.get("value")
-                if field_type == "check":
-                    checked = value is True or str(value).strip().lower() in (
-                        "1", "true", "yes", "on", "sí", "si",
-                    )
-                    right_extras.append((name, "Sí" if checked else "No"))
-                elif field_type == "texto":
-                    text_val = str(value or "").strip()
-                    if text_val:
-                        texto_extras.append((name, text_val))
-                else:
-                    text_val = str(value or "").strip()
-                    if text_val:
-                        right_extras.append((name, text_val[:60]))
+        right_rows, texto_rows = split_extra_fields_for_pdf(raw_extras)
     except Exception:
-        right_extras = []
-        texto_extras = []
+        right_rows, texto_rows = [], []
 
-    if right_extras:
-        right_meta = [
-            Paragraph(f"<b>{name}:</b> {value}", styles["LeftHeading"])
-            for name, value in right_extras
-        ]
-        meta_table = Table(
-            [[left_meta, right_meta]],
-            colWidths=[3.5 * inch, 3.5 * inch],
-        )
-        meta_table.setStyle(TableStyle([
-            ("VALIGN", (0, 0), (-1, -1), "TOP"),
-            ("LEFTPADDING", (0, 0), (-1, -1), 0),
-            ("RIGHTPADDING", (0, 0), (-1, -1), 8),
-            ("TOPPADDING", (0, 0), (-1, -1), 0),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
-        ]))
-        elements.append(meta_table)
-    else:
-        elements.extend(left_meta)
-
-    for name, text_val in texto_extras:
-        elements.append(Spacer(1, 0.12 * inch))
-        elements.append(Paragraph(f"<b>{name}:</b>", styles["LeftHeading"]))
-        safe = (
-            text_val.replace("&", "&amp;")
-            .replace("<", "&lt;")
-            .replace(">", "&gt;")
-            .replace("\n", "<br/>")
-        )
-        elements.append(Paragraph(safe, styles["LeftHeading"]))
-
-    elements.append(Spacer(1, 0.25*inch))
+    content_width = doc.width
+    append_order_document_header(
+        elements,
+        workspace,
+        doc_title="DOCUMENTO DE SALIDA",
+        left_rows=left_rows,
+        right_rows=right_rows,
+        texto_rows=texto_rows,
+        content_width=content_width,
+    )
 
     # Tabla de productos
     data = [["Producto", "SKU", "Cantidad", "Unidad"]]
@@ -1300,8 +1242,10 @@ def generate_exit_pdf(exit_instance):
 
     # Si hay productos
     if len(data) > 1:
-        table = Table(data, colWidths=[
-                      2.75*inch, 1.75*inch, 0.75*inch, 0.75*inch])
+        table = Table(
+            data,
+            colWidths=_pdf_col_widths(content_width, _EXIT_PRODUCT_COL_RATIOS),
+        )
         table.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.black),
@@ -1315,7 +1259,7 @@ def generate_exit_pdf(exit_instance):
             ('RIGHTPADDING', (0, 0), (-1, -1), 6),
             ('BACKGROUND', (0, 1), (-1, -1), colors.white),
             ('ALIGN', (2, 1), (3, -1), 'CENTER'),
-            ('GRID', (0, 0), (-1, -1), 1, colors.black),
+            ('GRID', (0, 0), (-1, -1), ORDER_PDF_BORDER_WIDTH, colors.HexColor(ORDER_PDF_BORDER)),
             ('VALIGN', (0, 0), (-1, -1), 'TOP'),
             ('FONTSIZE', (0, 1), (-1, -1), 8),
         ]))
@@ -1587,17 +1531,6 @@ def generate_entry_pdf(entry_instance):
     workspace = getattr(entry_instance.client, "workspace", None)
     owner_label = workspace_display_name(workspace)
 
-    # Logo arriba; si hay logo, no se muestra el nombre del owner.
-    append_workspace_logo(elements, workspace, styles["CenterTitle"], size=1.35)
-
-    # Título
-    elements.append(Spacer(1, 0.2 * inch))
-    elements.append(
-        Paragraph("GERENCIA DE OPERACIONES", styles["CenterTitle"]))
-    elements.append(Paragraph("DOCUMENTO DE ENTRADA", styles["CenterTitle"]))
-    elements.append(Spacer(1, 0.25*inch))
-
-    # Información de la entrada (izq) + campos extras (der, si hay)
     if entry_instance.entry_date:
         fecha_entrada = entry_instance.entry_date.strftime("%d/%m/%Y")
     elif entry_instance.created_at:
@@ -1605,103 +1538,35 @@ def generate_entry_pdf(entry_instance):
     else:
         fecha_entrada = "N/A"
 
-    left_meta = [
-        Paragraph(f"<b>Fecha de Entrada:</b> {fecha_entrada}", styles["LeftHeading"]),
-        Paragraph(f"<b>Código de Entrada:</b> {entry_instance.code}", styles["LeftHeading"]),
-        Paragraph(f"<b>Cliente:</b> {entry_instance.client.name}", styles["LeftHeading"]),
+    left_rows = [
+        ("Fecha de Entrada", fecha_entrada),
+        ("Código de Entrada", entry_instance.code),
+        ("Cliente", entry_instance.client.name),
     ]
     if entry_instance.storage:
-        left_meta.append(
-            Paragraph(f"<b>Almacén:</b> {entry_instance.storage.name}", styles["LeftHeading"])
-        )
+        left_rows.append(("Almacén", entry_instance.storage.name))
     if entry_instance.condition:
-        left_meta.append(
-            Paragraph(
-                f"<b>Condición:</b> {entry_instance.get_condition_display()}",
-                styles["LeftHeading"],
-            )
-        )
+        left_rows.append(("Condición", entry_instance.get_condition_display()))
     if entry_instance.in_type:
-        left_meta.append(
-            Paragraph(
-                f"<b>Tipo de Entrada:</b> {entry_instance.get_in_type_display()}",
-                styles["LeftHeading"],
-            )
-        )
+        left_rows.append(("Tipo de Entrada", entry_instance.get_in_type_display()))
 
-    # Extras: valor/check → columna derecha; texto → debajo de cabecera (fila propia)
-    right_extras = []
-    texto_extras = []
     try:
         detail = getattr(entry_instance, "entry_detail", None)
         raw_extras = getattr(detail, "extra_fields", None) if detail else None
-        if isinstance(raw_extras, list):
-            for item in raw_extras:
-                if not isinstance(item, dict):
-                    continue
-                name = str(item.get("name") or "").strip()
-                if not name:
-                    continue
-                field_type = str(item.get("type") or "normal").strip().lower()
-                if field_type in ("text", "number", "date", "valor"):
-                    field_type = "normal"
-                if field_type in ("textarea",):
-                    field_type = "texto"
-                if field_type in ("bool", "boolean"):
-                    field_type = "check"
-                value = item.get("value")
-                if field_type == "check":
-                    checked = value is True or str(value).strip().lower() in (
-                        "1", "true", "yes", "on", "sí", "si",
-                    )
-                    right_extras.append((name, "Sí" if checked else "No"))
-                elif field_type == "texto":
-                    text_val = str(value or "").strip()
-                    if text_val:
-                        texto_extras.append((name, text_val))
-                else:
-                    text_val = str(value or "").strip()
-                    if text_val:
-                        right_extras.append((name, text_val[:60]))
+        right_rows, texto_rows = split_extra_fields_for_pdf(raw_extras)
     except Exception:
-        right_extras = []
-        texto_extras = []
+        right_rows, texto_rows = [], []
 
-    if right_extras:
-        right_meta = [
-            Paragraph(f"<b>{name}:</b> {value}", styles["LeftHeading"])
-            for name, value in right_extras
-        ]
-        meta_table = Table(
-            [[left_meta, right_meta]],
-            colWidths=[3.5 * inch, 3.5 * inch],
-        )
-        meta_table.setStyle(TableStyle([
-            ("VALIGN", (0, 0), (-1, -1), "TOP"),
-            ("LEFTPADDING", (0, 0), (-1, -1), 0),
-            ("RIGHTPADDING", (0, 0), (-1, -1), 8),
-            ("TOPPADDING", (0, 0), (-1, -1), 0),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
-        ]))
-        elements.append(meta_table)
-    else:
-        elements.extend(left_meta)
-
-    for name, text_val in texto_extras:
-        elements.append(Spacer(1, 0.12 * inch))
-        elements.append(
-            Paragraph(f"<b>{name}:</b>", styles["LeftHeading"])
-        )
-        # Conservar saltos de línea (máx. 6 ya validados al guardar)
-        safe = (
-            text_val.replace("&", "&amp;")
-            .replace("<", "&lt;")
-            .replace(">", "&gt;")
-            .replace("\n", "<br/>")
-        )
-        elements.append(Paragraph(safe, styles["LeftHeading"]))
-
-    elements.append(Spacer(1, 0.25*inch))
+    content_width = doc.width
+    append_order_document_header(
+        elements,
+        workspace,
+        doc_title="DOCUMENTO DE ENTRADA",
+        left_rows=left_rows,
+        right_rows=right_rows,
+        texto_rows=texto_rows,
+        content_width=content_width,
+    )
 
     # Tabla de productos
     data = [["Producto", "SKU", "Cantidad", "Unidad", "Lote", "Fecha Exp."]]
@@ -1749,8 +1614,10 @@ def generate_entry_pdf(entry_instance):
 
     # Si hay productos
     if len(data) > 1:
-        table = Table(data, colWidths=[
-                      2.5*inch, 1.5*inch, 0.75*inch, 0.75*inch, 1*inch, 0.75*inch])
+        table = Table(
+            data,
+            colWidths=_pdf_col_widths(content_width, _ENTRY_PRODUCT_COL_RATIOS),
+        )
         table.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.black),
@@ -1764,7 +1631,7 @@ def generate_entry_pdf(entry_instance):
             ('RIGHTPADDING', (0, 0), (-1, -1), 6),
             ('BACKGROUND', (0, 1), (-1, -1), colors.white),
             ('ALIGN', (2, 1), (5, -1), 'CENTER'),
-            ('GRID', (0, 0), (-1, -1), 1, colors.black),
+            ('GRID', (0, 0), (-1, -1), ORDER_PDF_BORDER_WIDTH, colors.HexColor(ORDER_PDF_BORDER)),
             ('VALIGN', (0, 0), (-1, -1), 'TOP'),
             ('FONTSIZE', (0, 1), (-1, -1), 8),
         ]))
